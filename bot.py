@@ -38,7 +38,6 @@ def load_json(file):
 movie_data = load_json(MOVIES_FILE)
 pending_data = load_json(PENDING_FILE)
 
-# --- Command: /start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     user_id = update.effective_user.id
@@ -49,7 +48,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = args[0].lower()
     context.user_data["start_code"] = code
 
-    # Check if user has joined
     try:
         member = await context.bot.get_chat_member(MAIN_CHANNEL, user_id)
         if member.status not in ["member", "administrator", "creator"]:
@@ -60,16 +58,64 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("✅ I've Joined", callback_data=f"retry_{code}")]
         ])
         return await update.message.reply_text(
-            "🎥 Join our main channel first to access the movie.",
+            "🎥 Please join our main channel first to access this movie.",
             reply_markup=btn,
             parse_mode="Markdown"
         )
 
-    # Validate movie code
     if code not in movie_data:
         return await update.message.reply_text("❌ Invalid movie code.")
 
-    # Forward and send files
+    for file_info in movie_data[code]["files"]:
+        try:
+            caption = file_info.get("custom_caption") or "🎬 Movie File"
+
+            if file_info.get("file_id"):
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=file_info["file_id"],
+                    caption=caption,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=caption,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ Failed to send file or caption: {e}")
+
+    args = context.args
+    user_id = update.effective_user.id
+
+    if not args:
+        return await update.message.reply_text("❌ Usage: /start <moviecode>")
+
+    code = args[0].lower()
+    context.user_data["start_code"] = code
+
+    # Check if user has joined the main channel
+    try:
+        member = await context.bot.get_chat_member(MAIN_CHANNEL, user_id)
+        if member.status not in ["member", "administrator", "creator"]:
+            raise Exception("Not joined")
+    except:
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎬 Join Channel", url=f"https://t.me/{MAIN_CHANNEL.lstrip('@')}")],
+            [InlineKeyboardButton("✅ I've Joined", callback_data=f"retry_{code}")]
+        ])
+        return await update.message.reply_text(
+            "🎥 Please join our main channel first to access this movie.",
+            reply_markup=btn,
+            parse_mode="Markdown"
+        )
+
+    if code not in movie_data:
+        return await update.message.reply_text("❌ Invalid movie code.")
+
+    # Send movie files or info text
     for file_info in movie_data[code]["files"]:
         try:
             forwarded = await context.bot.forward_message(
@@ -77,17 +123,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from_chat_id=file_info["chat_id"],
                 message_id=file_info["message_id"]
             )
-            caption = generate_custom_caption(forwarded.caption or "", MAIN_CHANNEL)
-            await context.bot.send_document(
-                chat_id=update.effective_chat.id,
-                document=forwarded.document.file_id,
-                caption=caption,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        except Exception as e:
-            await update.message.reply_text(f"⚠️ Failed to send file: {e}")
 
-# --- Callback: Retry after joining ---
+            caption = generate_custom_caption(forwarded.caption or "", MAIN_CHANNEL)
+
+            if forwarded.document:
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=forwarded.document.file_id,
+                    caption=caption,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=caption,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ Failed to send file or caption: {e}")
+
+
 async def retry_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -99,7 +155,7 @@ async def retry_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if member.status not in ["member", "administrator", "creator"]:
             raise Exception()
     except:
-        return await query.edit_message_text("❌ You still haven't joined.")
+        return await query.edit_message_text("❌ You still haven't joined the channel.")
 
     if code not in movie_data:
         return await query.edit_message_text("❌ Invalid movie code.")
@@ -108,20 +164,27 @@ async def retry_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for file_info in movie_data[code]["files"]:
         try:
-            forwarded = await context.bot.forward_message(
-                chat_id=ADMIN_ID,
-                from_chat_id=file_info["chat_id"],
-                message_id=file_info["message_id"]
-            )
-            caption = generate_custom_caption(forwarded.caption or "", MAIN_CHANNEL)
-            await context.bot.send_document(
-                chat_id=query.message.chat.id,
-                document=forwarded.document.file_id,
-                caption=caption,
-                parse_mode=ParseMode.MARKDOWN
-            )
+            caption = file_info.get("custom_caption") or "🎬 Movie File"
+
+            if file_info.get("file_id"):
+                await context.bot.send_document(
+                    chat_id=query.message.chat.id,
+                    document=file_info["file_id"],
+                    caption=caption,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=query.message.chat.id,
+                    text=caption,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+
         except Exception as e:
-            await context.bot.send_message(query.message.chat.id, f"⚠️ Error sending file: {e}")
+            await context.bot.send_message(
+                chat_id=query.message.chat.id,
+                text=f"⚠️ Failed to send file or caption: {e}"
+            )
 
 # --- Command: /status ---
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -151,7 +214,7 @@ async def handle_forwarded_file(update: Update, context: ContextTypes.DEFAULT_TY
     original_caption = message.caption or message.text or ""
 
     if not message.forward_from_chat:
-        return
+        return await update.message.reply_text("⚠️ Please forward directly from the source channel.")
 
     user_key = str(update.effective_user.id)
     pending = pending_data.setdefault(user_key, {"files": [], "stage": None})
@@ -160,13 +223,14 @@ async def handle_forwarded_file(update: Update, context: ContextTypes.DEFAULT_TY
     message_id = message.forward_from_message_id
 
     if message_id is None:
-        return await update.message.reply_text("⚠️ Cannot detect message ID. Forward directly from the channel.")
+        return await update.message.reply_text("⚠️ Cannot detect forwarded message ID.")
 
     file_entry = {
         "chat_id": chat_id,
         "message_id": message_id,
         "original_caption": original_caption,
-        "custom_caption": generate_custom_caption(original_caption, "mollywooddiariesreloaded")
+        "custom_caption": generate_custom_caption(original_caption, channel_username="mollywooddiariesreloaded"),
+        "file_id": message.document.file_id if message.document else None
     }
 
     if file_entry not in pending["files"]:
