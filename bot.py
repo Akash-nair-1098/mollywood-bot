@@ -1,26 +1,29 @@
-# main_bot.py (your main bot script)
-
 from keep_alive import keep_alive
-keep_alive()  # start the keep-alive webserver in the background
+keep_alive()
 
+from custom_caption import generate_custom_caption
 
 import os
 import json
+import re
 from dotenv import load_dotenv
-load_dotenv()
+
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.constants import ParseMode
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ContextTypes, filters
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    CallbackQueryHandler, ContextTypes, filters
 )
 
-# Load config from file
+# --- Load config and environment ---
+load_dotenv()
+
 with open("config.json", "r") as f:
     config = json.load(f)
 
 ADMIN_ID = config["admin_id"]
-SOURCE_CHANNEL = config["source_channel"]  # e.g., -1001234567890
-MAIN_CHANNEL = config["main_channel"]      # e.g., "@YourMainChannel"
+SOURCE_CHANNEL = config["source_channel"]
+MAIN_CHANNEL = config["main_channel"]
 
 MOVIES_FILE = "movieFiles.json"
 PENDING_FILE = "pending.json"
@@ -35,8 +38,7 @@ def load_json(file):
 movie_data = load_json(MOVIES_FILE)
 pending_data = load_json(PENDING_FILE)
 
-# --- Telegram bot handlers ---
-
+# --- Command: /start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     user_id = update.effective_user.id
@@ -47,37 +49,45 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = args[0].lower()
     context.user_data["start_code"] = code
 
-    # Check join status
+    # Check if user has joined
     try:
         member = await context.bot.get_chat_member(MAIN_CHANNEL, user_id)
         if member.status not in ["member", "administrator", "creator"]:
             raise Exception("Not joined")
     except:
         btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎬 Join Our Main Channel", url=f"https://t.me/{MAIN_CHANNEL.lstrip('@')}")],
-            [InlineKeyboardButton("🍿 I've Joined, Retry", callback_data=f"retry_{code}")]
+            [InlineKeyboardButton("🎬 Join Channel", url=f"https://t.me/{MAIN_CHANNEL.lstrip('@')}")],
+            [InlineKeyboardButton("✅ I've Joined", callback_data=f"retry_{code}")]
         ])
         return await update.message.reply_text(
-            "🎥 Hey there! To watch the movies, please join our main channel *MOLLYWOOD DIARIES* first. After joining, click 'I've Joined, Retry' below.",
+            "🎥 Join our main channel first to access the movie.",
             reply_markup=btn,
             parse_mode="Markdown"
         )
 
-    # Check movie code
+    # Validate movie code
     if code not in movie_data:
         return await update.message.reply_text("❌ Invalid movie code.")
 
-    # Forward movie files using chat_id and message_id
+    # Forward and send files
     for file_info in movie_data[code]["files"]:
         try:
-            await context.bot.forward_message(
-                chat_id=update.effective_chat.id,
+            forwarded = await context.bot.forward_message(
+                chat_id=ADMIN_ID,
                 from_chat_id=file_info["chat_id"],
                 message_id=file_info["message_id"]
             )
+            caption = generate_custom_caption(forwarded.caption or "", MAIN_CHANNEL)
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=forwarded.document.file_id,
+                caption=caption,
+                parse_mode=ParseMode.MARKDOWN
+            )
         except Exception as e:
-            await update.message.reply_text(f"⚠️ Failed to send movie file: {e}")
+            await update.message.reply_text(f"⚠️ Failed to send file: {e}")
 
+# --- Callback: Retry after joining ---
 async def retry_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -89,7 +99,7 @@ async def retry_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if member.status not in ["member", "administrator", "creator"]:
             raise Exception()
     except:
-        return await query.edit_message_text("❌ You still haven't joined the channel.")
+        return await query.edit_message_text("❌ You still haven't joined.")
 
     if code not in movie_data:
         return await query.edit_message_text("❌ Invalid movie code.")
@@ -98,19 +108,28 @@ async def retry_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for file_info in movie_data[code]["files"]:
         try:
-            await context.bot.forward_message(
-                chat_id=query.message.chat.id,
+            forwarded = await context.bot.forward_message(
+                chat_id=ADMIN_ID,
                 from_chat_id=file_info["chat_id"],
                 message_id=file_info["message_id"]
             )
+            caption = generate_custom_caption(forwarded.caption or "", MAIN_CHANNEL)
+            await context.bot.send_document(
+                chat_id=query.message.chat.id,
+                document=forwarded.document.file_id,
+                caption=caption,
+                parse_mode=ParseMode.MARKDOWN
+            )
         except Exception as e:
-            await context.bot.send_message(query.message.chat.id, f"⚠️ Error forwarding file: {e}")
+            await context.bot.send_message(query.message.chat.id, f"⚠️ Error sending file: {e}")
 
+# --- Command: /status ---
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     await update.message.reply_text("✅ Bot is alive.")
 
+# --- Command: /delete <moviecode> ---
 async def delete_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -123,26 +142,33 @@ async def delete_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_json(MOVIES_FILE, movie_data)
     await update.message.reply_text(f"🗑 Deleted movie `{code}`", parse_mode="Markdown")
 
+# --- Handle Forwarded Movie Files ---
 async def handle_forwarded_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
-    # Check if forwarded from a channel (source channel)
-    if not update.message.forward_from_chat:
+    message = update.message
+    original_caption = message.caption or message.text or ""
+
+    if not message.forward_from_chat:
         return
 
     user_key = str(update.effective_user.id)
     pending = pending_data.setdefault(user_key, {"files": [], "stage": None})
 
-    chat_id = update.message.forward_from_chat.id
-    message_id = update.message.forward_from_message_id
+    chat_id = message.forward_from_chat.id
+    message_id = message.forward_from_message_id
 
     if message_id is None:
-        await update.message.reply_text("⚠️ Cannot get forwarded message ID. Please forward directly from the channel.")
-        return
+        return await update.message.reply_text("⚠️ Cannot detect message ID. Forward directly from the channel.")
 
-    # Avoid duplicates
-    file_entry = {"chat_id": chat_id, "message_id": message_id}
+    file_entry = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "original_caption": original_caption,
+        "custom_caption": generate_custom_caption(original_caption, "mollywooddiariesreloaded")
+    }
+
     if file_entry not in pending["files"]:
         pending["files"].append(file_entry)
 
@@ -153,6 +179,7 @@ async def handle_forwarded_file(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         save_json(PENDING_FILE, pending_data)
 
+# --- Handle Poster ---
 async def handle_poster(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -168,6 +195,7 @@ async def handle_poster(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_json(PENDING_FILE, pending_data)
     await update.message.reply_text("🔢 Now send the unique movie code for /start command.")
 
+# --- Handle Movie Code Entry ---
 async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -200,8 +228,7 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("✅ Movie added. Forward the above message to your group!")
 
-# --- Main entrypoint ---
-
+# --- Entrypoint ---
 def main():
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
