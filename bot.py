@@ -2,6 +2,7 @@
 
 import os, json
 import asyncio
+from keep_alive import keep_alive
 from telegram import (
     Update, InlineKeyboardMarkup, InlineKeyboardButton, Document
 )
