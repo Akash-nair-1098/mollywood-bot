@@ -201,5 +201,12 @@ def main():
 
     app.run_polling()
 
-if __name__=="__main__":
-    main()
+   print("🤖 Bot starting...")
+    await asyncio.gather(
+        keep_alive(),           # 🔁 Starts web server on port 8080
+        app.run_polling()       # 🤖 Starts the bot
+    )
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
