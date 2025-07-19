@@ -185,7 +185,7 @@ async def cmd_status(u,ctx):
         await u.message.reply_text("✅ Bot is alive.")
 
 def main():
-    app=ApplicationBuilder().token(TOKEN).build()
+    app=ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("upload",cmd_upload))
     app.add_handler(CallbackQueryHandler(on_type,pattern="^t_"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, on_file_or_text))
