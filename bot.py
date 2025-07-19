@@ -1,5 +1,4 @@
 # created by Akash Kiran T 
-
 import os, json
 from dotenv import load_dotenv
 from telegram import (
