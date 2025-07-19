@@ -1,6 +1,7 @@
 # created by Akash Kiran T 
 
 import os, json
+import asyncio
 from telegram import (
     Update, InlineKeyboardMarkup, InlineKeyboardButton, Document
 )
@@ -184,29 +185,29 @@ async def cmd_status(u,ctx):
     if u.effective_user.id==ADMIN_ID:
         await u.message.reply_text("✅ Bot is alive.")
 
-def main():
-    app=ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("upload",cmd_upload))
-    app.add_handler(CallbackQueryHandler(on_type,pattern="^t_"))
+
+async def main():
+    print("🤖 Bot starting...")
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("upload", cmd_upload))
+    app.add_handler(CallbackQueryHandler(on_type, pattern="^t_"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, on_file_or_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, on_poster))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^[a-zA-Z0-9_-]+$"), on_code))
-    app.add_handler(CallbackQueryHandler(on_alt_btn,pattern="^alt_"))
+    app.add_handler(CallbackQueryHandler(on_alt_btn, pattern="^alt_"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^https?://"), on_alt_input))
-    app.add_handler(CommandHandler("start",cmd_start))
+    app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(on_retry, pattern="^retry_"))
-    app.add_handler(CallbackQueryHandler(on_getlang,pattern="^getlang_"))
-    app.add_handler(CommandHandler("delete",cmd_delete))
-    app.add_handler(CommandHandler("status",cmd_status))
+    app.add_handler(CallbackQueryHandler(on_getlang, pattern="^getlang_"))
+    app.add_handler(CommandHandler("delete", cmd_delete))
+    app.add_handler(CommandHandler("status", cmd_status))
 
-    app.run_polling()
-
-   print("🤖 Bot starting...")
     await asyncio.gather(
-        keep_alive(),           # 🔁 Starts web server on port 8080
-        app.run_polling()       # 🤖 Starts the bot
+        keep_alive(),           # Start the web server (for Render/UptimeRobot)
+        app.run_polling()       # Start the Telegram bot
     )
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
