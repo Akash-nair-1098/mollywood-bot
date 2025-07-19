@@ -1,7 +1,6 @@
 # created by Akash Kiran T 
 
 import os, json
-from dotenv import load_dotenv
 from telegram import (
     Update, InlineKeyboardMarkup, InlineKeyboardButton, Document
 )
@@ -10,11 +9,13 @@ from telegram.ext import (
     CallbackQueryHandler, ContextTypes, filters
 )
 
+from dotenv import load_dotenv
 load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-TOKEN    = os.getenv("BOT_TOKEN")
-SRC_CH   = os.getenv("SOURCE_CHANNEL")
-MAIN_CH  = os.getenv("MAIN_CHANNEL")
+MAIN_CHANNEL = os.getenv("MAIN_CHANNEL")
+SOURCE_CHANNEL = os.getenv("SOURCE_CHANNEL")
 
 MOVIES = "movieFiles.json"
 PENDING = "pending.json"
