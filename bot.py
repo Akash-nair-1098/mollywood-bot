@@ -1,254 +1,202 @@
-from keep_alive import keep_alive
-keep_alive()
-
-from custom_caption import generate_custom_caption
-
-import os
-import json
-import re
+import os, json
 from dotenv import load_dotenv
-
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.constants import ParseMode
+from telegram import (
+    Update, InlineKeyboardMarkup, InlineKeyboardButton, Document
+)
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, ContextTypes, filters
 )
 
-# --- Load config and environment ---
 load_dotenv()
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
+TOKEN    = os.getenv("BOT_TOKEN")
+SRC_CH   = os.getenv("SOURCE_CHANNEL")
+MAIN_CH  = os.getenv("MAIN_CHANNEL")
 
-with open("config.json", "r") as f:
-    config = json.load(f)
+MOVIES = "movieFiles.json"
+PENDING = "pending.json"
 
-ADMIN_ID = config["admin_id"]
-SOURCE_CHANNEL = config["source_channel"]
-MAIN_CHANNEL = config["main_channel"]
+def load(fn): return json.load(open(fn)) if os.path.exists(fn) else {}
+def save(fn,data): open(fn,"w").write(json.dumps(data, indent=2))
 
-MOVIES_FILE = "movieFiles.json"
-PENDING_FILE = "pending.json"
+movies = load(MOVIES)
+pending = load(PENDING)
 
-def save_json(file, data):
-    with open(file, "w") as f:
-        json.dump(data, f, indent=2)
+# — STEP 0: Admin Initiates Upload with /upload
+async def cmd_upload(u,ctx):
+    if u.effective_user.id!=ADMIN_ID: return
+    kb=[[InlineKeyboardButton("🎞 Single",callback_data="t_single")],
+        [InlineKeyboardButton("🌐 Multi‑Language",callback_data="t_multi")]]
+    await u.message.reply_text("Choose mode:",reply_markup=InlineKeyboardMarkup(kb))
 
-def load_json(file):
-    return json.load(open(file)) if os.path.exists(file) else {}
+# — STEP 1: Handle Single vs Multi
+async def on_type(u,ctx):
+    data = pending[str(u.from_user.id)] = {"type":None,"files":{}, "stage":"files"}
+    data["type"] = "single" if u.data=="t_single" else "multi"
+    if data["type"]=="single": data["files"]=[]
+    await u.edit_message_text("📥 Send all movie files now." if data["type"]=="single"
+                              else "📥 Send as:\n<LanguageName>\n[file1]\n[file2]\n...")
 
-movie_data = load_json(MOVIES_FILE)
-pending_data = load_json(PENDING_FILE)
+    save(PENDING,pending)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    user_id = update.effective_user.id
+# — STEP 2: Admin Sends Content
+async def on_file_or_text(u,ctx):
+    uid=str(u.effective_user.id)
+    if u.effective_user.id!=ADMIN_ID or uid not in pending: return
+    data=pending[uid]
+    if data["stage"]!="files": return
 
-    if not args:
-        return await update.message.reply_text("❌ Usage: /start <moviecode>")
-
-    code = args[0].lower()
-    context.user_data["start_code"] = code
-
-    # Check if user has joined the main channel
-    try:
-        member = await context.bot.get_chat_member(MAIN_CHANNEL, user_id)
-        if member.status not in ["member", "administrator", "creator"]:
-            raise Exception("Not joined")
-    except:
-        btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎬 Join Channel", url=f"https://t.me/{MAIN_CHANNEL.lstrip('@')}")],
-            [InlineKeyboardButton("✅ I've Joined", callback_data=f"retry_{code}")]
-        ])
-        return await update.message.reply_text(
-            "🎥 Please join our main channel first to access this movie.",
-            reply_markup=btn,
-            parse_mode="Markdown"
-        )
-
-    if code not in movie_data:
-        return await update.message.reply_text("❌ Invalid movie code.")
-
-    for file_info in movie_data[code]["files"]:
-        try:
-            if file_info.get("file_id"):
-                # Media file — send with custom caption
-                await context.bot.send_document(
-                    chat_id=update.effective_chat.id,
-                    document=file_info["file_id"],
-                    caption=file_info.get("custom_caption") or "",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            else:
-                # No file — send the original caption/text exactly as-is
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=file_info.get("original_caption", "📄 Info"),
-                    parse_mode=ParseMode.MARKDOWN  # Or remove if formatting breaks
-                )
-
-        except Exception as e:
-            await update.message.reply_text(f"⚠️ Failed to send: {e}")
-
-
-async def retry_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    code = query.data.split("_", 1)[1]
-
-    try:
-        member = await context.bot.get_chat_member(MAIN_CHANNEL, user_id)
-        if member.status not in ["member", "administrator", "creator"]:
-            raise Exception()
-    except:
-        return await query.edit_message_text("❌ You still haven't joined the channel.")
-
-    if code not in movie_data:
-        return await query.edit_message_text("❌ Invalid movie code.")
-
-    await query.edit_message_text("✅ Access granted. Sending files...")
-
-    for file_info in movie_data[code]["files"]:
-        try:
-            if file_info.get("file_id"):
-                await context.bot.send_document(
-                    chat_id=query.message.chat.id,
-                    document=file_info["file_id"],
-                    caption=file_info.get("custom_caption") or "",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            else:
-                await context.bot.send_message(
-                    chat_id=query.message.chat.id,
-                    text=file_info.get("original_caption", "📄 Info"),
-                    parse_mode=ParseMode.MARKDOWN  # Or remove
-                )
-
-        except Exception as e:
-            await context.bot.send_message(
-                chat_id=query.message.chat.id,
-                text=f"⚠️ Failed to send: {e}"
-            )
-
-# --- Command: /status ---
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    await update.message.reply_text("✅ Bot is alive.")
-
-# --- Command: /delete <moviecode> ---
-async def delete_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if len(context.args) != 1:
-        return await update.message.reply_text("❌ Usage: /delete <moviecode>")
-    code = context.args[0].lower()
-    if code not in movie_data:
-        return await update.message.reply_text("❌ No such movie found.")
-    del movie_data[code]
-    save_json(MOVIES_FILE, movie_data)
-    await update.message.reply_text(f"🗑 Deleted movie `{code}`", parse_mode="Markdown")
-
-# --- Handle Forwarded Movie Files ---
-async def handle_forwarded_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    message = update.message
-    original_caption = message.caption or message.text or ""
-
-    if not message.forward_from_chat:
-        return await update.message.reply_text("⚠️ Please forward directly from the source channel.")
-
-    user_key = str(update.effective_user.id)
-    pending = pending_data.setdefault(user_key, {"files": [], "stage": None})
-
-    chat_id = message.forward_from_chat.id
-    message_id = message.forward_from_message_id
-
-    if message_id is None:
-        return await update.message.reply_text("⚠️ Cannot detect forwarded message ID.")
-
-    file_entry = {
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "original_caption": original_caption,
-        "custom_caption": generate_custom_caption(original_caption, channel_username="mollywooddiariesreloaded"),
-        "file_id": message.document.file_id if message.document else None
-    }
-
-    if file_entry not in pending["files"]:
-        pending["files"].append(file_entry)
-
-    if pending["stage"] != "poster":
-        pending["stage"] = "poster"
-        save_json(PENDING_FILE, pending_data)
-        await update.message.reply_text("✅ Files received.\n📌 Now send the poster (image or text).")
+    msg=u.message
+    if data["type"]=="multi":
+        if msg.text:
+            data.setdefault("files",{})[msg.text.strip()]=[]
+            data["current"]=msg.text.strip()
+        elif msg.document:
+            if "current" not in data: return await msg.reply_text("⚠️ Send a language name first.")
+            data["files"][data["current"]].append({"file_id":msg.document.file_id})
     else:
-        save_json(PENDING_FILE, pending_data)
+        if msg.document:
+            data["files"].append({"file_id":msg.document.file_id})
+    save(PENDING,pending)
 
-# --- Handle Poster ---
-async def handle_poster(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    user_key = str(update.effective_user.id)
-    pending = pending_data.get(user_key)
-    if not pending or pending["stage"] != "poster":
-        return
+# — STEP 3: Poster Upload
+async def on_poster(u,ctx):
+    uid=str(u.effective_user.id)
+    if u.effective_user.id!=ADMIN_ID or uid not in pending: return
+    data=pending[uid]
+    if data["stage"]!="files": return
+    msg=u.message
+    data["poster"]=msg.caption or msg.text or ""
+    if msg.photo: data["photo"]=msg.photo[-1].file_id
+    data["stage"]="code"
+    save(PENDING,pending)
+    await msg.reply_text("🔢 Now send a unique movie-code:")
 
-    pending["poster"] = update.message.caption or update.message.text or ""
-    if update.message.photo:
-        pending["photo"] = update.message.photo[-1].file_id
-    pending["stage"] = "code"
-    save_json(PENDING_FILE, pending_data)
-    await update.message.reply_text("🔢 Now send the unique movie code for /start command.")
+# — STEP 4: Receive movie-code
+async def on_code(u,ctx):
+    uid=str(u.effective_user.id)
+    if u.effective_user.id!=ADMIN_ID or uid not in pending: return
+    data=pending[uid]
+    if data["stage"]!="code": return
+    code=u.message.text.strip().lower()
+    if code in movies: return await u.message.reply_text("❌ Code already exists.")
+    data["code"]=code
+    data["stage"]="altlink"
+    save(PENDING,pending)
+    kb=[[InlineKeyboardButton("➕ Add Link",callback_data="alt_provide")],
+        [InlineKeyboardButton("⏭ Skip",callback_data="alt_skip")]]
+    await u.message.reply_text("🎥 Alternate link?",reply_markup=InlineKeyboardMarkup(kb))
 
-# --- Handle Movie Code Entry ---
-async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    user_key = str(update.effective_user.id)
-    pending = pending_data.get(user_key)
-    if not pending or pending["stage"] != "code":
-        return
-
-    code = update.message.text.strip().lower()
-    if code in movie_data:
-        return await update.message.reply_text("❌ Code already exists. Try another.")
-
-    movie_data[code] = {
-        "files": pending["files"],
-        "poster": pending.get("poster", ""),
-        "photo": pending.get("photo")
-    }
-    save_json(MOVIES_FILE, movie_data)
-    del pending_data[user_key]
-    save_json(PENDING_FILE, pending_data)
-
-    btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("▶️ Get Movie", url=f"https://t.me/{context.bot.username}?start={code}")]
-    ])
-
-    if "photo" in movie_data[code]:
-        await context.bot.send_photo(update.effective_chat.id, photo=movie_data[code]["photo"], caption=movie_data[code]["poster"], reply_markup=btn)
+# — STEP 5: Optional Alt Link Buttons
+async def on_alt_btn(u,ctx):
+    uid=str(u.from_user.id)
+    data=pending[uid]
+    await u.answer()
+    if u.data=="alt_skip":
+        data["alt_link"]=None
+        await finalize(u,ctx)
     else:
-        await context.bot.send_message(update.effective_chat.id, text=movie_data[code]["poster"], reply_markup=btn)
+        data["stage"]="altwait"
+        await u.edit_message_text("🔗 Send alternate link now.")
+    save(PENDING,pending)
 
-    await update.message.reply_text("✅ Movie added. Forward the above message to your group!")
+# — STEP 6: Receive Alt Link Input
+async def on_alt_input(u,ctx):
+    uid=str(u.effective_user.id)
+    if u.effective_user.id!=ADMIN_ID or uid not in pending: return
+    data=pending[uid]
+    if data["stage"]!="altwait": return
+    data["alt_link"]=u.message.text.strip()
+    await finalize(u,ctx); save(PENDING,pending)
 
-# --- Entrypoint ---
+# — Create Poster + Buttons + Auto-post
+async def finalize(u,ctx):
+    uid=str(u.effective_user.id)
+    d=pending.pop(uid)
+    movies[d["code"]]=d
+    save(MOVIES,movies)
+    save(PENDING,pending)
+
+    kb=[[InlineKeyboardButton("▶️ Get Movie",url=f"https://t.me/{ctx.bot.username}?start={d['code']}")]]
+    if d.get("alt_link"): kb.append([InlineKeyboardButton("📥 If bot not responding...",url=d["alt_link"])])
+
+    markup=InlineKeyboardMarkup(kb)
+    if d.get("photo"):
+        msg=await ctx.bot.send_photo(chat_id=u.effective_chat.id,photo=d["photo"],caption=d["poster"],reply_markup=markup)
+    else:
+        msg=await ctx.bot.send_message(chat_id=u.effective_chat.id,text=d["poster"],reply_markup=markup)
+    # Auto post to main channel
+    await ctx.bot.forward_message(chat_id=MAIN_CH,from_chat_id=msg.chat_id,message_id=msg.message_id)
+
+# — /start for Users (with join-check)
+async def cmd_start(u,ctx):
+    usr=u.effective_user.id; args=ctx.args or []
+    if not args: return await u.message.reply_text("❌ Usage: /start <moviecode>")
+    code=args[0].lower()
+    try:
+        mem=await ctx.bot.get_chat_member(MAIN_CH,usr)
+        if mem.status not in ["member","administrator","creator"]: raise
+    except:
+        kb=[[InlineKeyboardButton("🎬 Join Channel",url=f"https://t.me/{MAIN_CH.lstrip('@')}")],
+            [InlineKeyboardButton("🔄 Retry",callback_data=f"retry_{code}")]]
+        return await u.message.reply_text("Join our channel first.",reply_markup=InlineKeyboardMarkup(kb))
+    if code not in movies: return await u.message.reply_text("❌ Invalid code.")
+    d=movies[code]
+
+    if d["type"]=="multi":
+        kb=[[InlineKeyboardButton(lang,callback_data=f"getlang_{code}_{lang}")] for lang in d["files"]]
+        return await u.message.reply_text("Choose language:",reply_markup=InlineKeyboardMarkup(kb))
+    else:
+        for file in d["files"]:
+            await ctx.bot.send_document(u.effective_chat.id, file["file_id"])
+        if d.get("alt_link"):
+            await ctx.bot.send_message(chat_id=u.effective_chat.id,
+                text=f"📥 If bot not responding, click here: {d['alt_link']}")
+
+# — Join Retry
+async def on_retry(u,ctx):
+    await u.answer()
+    return await cmd_start(u,ctx)
+
+# — Language buttons for Users
+async def on_getlang(u,ctx):
+    await u.answer()
+    _,code,lang=u.data.split("_",2)
+    for file in movies[code]["files"][lang]:
+        await ctx.bot.send_document(u.message.chat.id, file["file_id"])
+    if movies[code].get("alt_link"):
+        await ctx.bot.send_message(chat_id=u.message.chat.id,
+            text=f"📥 If bot not responding, click here: {movies[code]['alt_link']}")
+
+# — Deletion, Status
+async def cmd_delete(u,ctx):
+    if u.effective_user.id!=ADMIN_ID: return
+    c=ctx.args and ctx.args[0].lower()
+    if not c or c not in movies: return await u.message.reply_text("❌ Usage: /delete <code>")
+    del movies[c]; save(MOVIES,movies)
+    await u.message.reply_text(f"✅ Deleted `{c}`")
+
+async def cmd_status(u,ctx):
+    if u.effective_user.id==ADMIN_ID:
+        await u.message.reply_text("✅ Bot is alive.")
+
 def main():
-    app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+    app=ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("upload",cmd_upload))
+    app.add_handler(CallbackQueryHandler(on_type,pattern="^t_"))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, on_file_or_text))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, on_poster))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^[a-zA-Z0-9_-]+$"), on_code))
+    app.add_handler(CallbackQueryHandler(on_alt_btn,pattern="^alt_"))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^https?://"), on_alt_input))
+    app.add_handler(CommandHandler("start",cmd_start))
+    app.add_handler(CallbackQueryHandler(on_retry, pattern="^retry_"))
+    app.add_handler(CallbackQueryHandler(on_getlang,pattern="^getlang_"))
+    app.add_handler(CommandHandler("delete",cmd_delete))
+    app.add_handler(CommandHandler("status",cmd_status))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(retry_join, pattern=r"^retry_"))
-    app.add_handler(CommandHandler("status", status))
-    app.add_handler(CommandHandler("delete", delete_movie))
-    app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, handle_forwarded_file))
-    app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_poster))
-    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_code))
-
-    print("✅ Bot is running...")
     app.run_polling()
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
