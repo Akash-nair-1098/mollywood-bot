@@ -37,25 +37,28 @@ async def cmd_upload(u,ctx):
 # — STEP 1: Handle Single vs Multi
 async def on_type(u, ctx):
     await u.callback_query.answer()
-    data = pending[str(u.effective_user.id)] = {"type": None, "files": {}, "stage": "files"}
+    uid = str(u.from_user.id)
+    data = pending[uid] = {"type": None, "files": {}, "stage": "files"}
+
     data["type"] = "single" if u.callback_query.data == "t_single" else "multi"
     if data["type"] == "single":
         data["files"] = []
+
+    save(PENDING, pending)
 
     message = (
         "📥 Send all movie files now." if data["type"] == "single"
         else "📥 Send as:\n<LanguageName>\n[file1]\n[file2]\n..."
     )
 
-        await u.callback_query.edit_message_text(
+    await u.callback_query.edit_message_text(
         message,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Done", callback_data="done_files")]
         ])
     )
-    save(PENDING, pending)
 
-    async def on_done_files(u, ctx):
+   async def on_done_files(u, ctx):
     await u.callback_query.answer()
     uid = str(u.effective_user.id)
     if uid not in pending or pending[uid]["stage"] != "files":
