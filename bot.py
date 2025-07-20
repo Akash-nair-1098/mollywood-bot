@@ -58,15 +58,6 @@ async def on_type(u, ctx):
         ])
     )
 
-   async def on_done_files(u, ctx):
-    await u.callback_query.answer()
-    uid = str(u.effective_user.id)
-    if uid not in pending or pending[uid]["stage"] != "files":
-        return await u.callback_query.edit_message_text("❌ You haven't started uploading files.")
-    
-    pending[uid]["stage"] = "poster"
-    save(PENDING, pending)
-    await u.callback_query.edit_message_text("✅ Files received. 📌 Now send the movie **poster** as photo (with caption) or just a text.")
 
 
 
@@ -89,6 +80,19 @@ async def on_file_or_text(u,ctx):
         if msg.document:
             data["files"].append({"file_id":msg.document.file_id})
     save(PENDING,pending)
+
+    # — Confirm Files Uploaded
+async def on_done_files(u, ctx):
+    await u.callback_query.answer()
+    uid = str(u.effective_user.id)
+    if uid not in pending or pending[uid]["stage"] != "files":
+        return await u.callback_query.edit_message_text("❌ You haven't started uploading files.")
+    
+    pending[uid]["stage"] = "poster"
+    save(PENDING, pending)
+    await u.callback_query.edit_message_text(
+        "✅ Files received. 📌 Now send the movie poster as a **photo** with caption or as **text only**."
+    )
 
 # — STEP 3: Poster Upload
 async def on_poster(u,ctx):
