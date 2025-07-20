@@ -36,12 +36,16 @@ async def cmd_upload(u,ctx):
 
 # — STEP 1: Handle Single vs Multi
 async def on_type(u,ctx):
+    await u.answer()
     data = pending[str(u.from_user.id)] = {"type":None,"files":{}, "stage":"files"}
     data["type"] = "single" if u.data=="t_single" else "multi"
     if data["type"]=="single": data["files"]=[]
     await u.edit_message_text("📥 Send all movie files now." if data["type"]=="single"
-                              else "📥 Send as:\n<LanguageName>\n[file1]\n[file2]\n...")
-
+                              else "📥 Send as:
+<LanguageName>
+[file1]
+[file2]
+...")
     save(PENDING,pending)
 
 # — STEP 2: Admin Sends Content
@@ -131,7 +135,7 @@ async def finalize(u,ctx):
     else:
         msg=await ctx.bot.send_message(chat_id=u.effective_chat.id,text=d["poster"],reply_markup=markup)
     # Auto post to main channel
-    await ctx.bot.forward_message(chat_id=MAIN_CH,from_chat_id=msg.chat_id,message_id=msg.message_id)
+    await ctx.bot.forward_message(chat_id=MAIN_CHANNEL,from_chat_id=msg.chat_id,message_id=msg.message_id)
 
 # — /start for Users (with join-check)
 async def cmd_start(u,ctx):
@@ -139,10 +143,10 @@ async def cmd_start(u,ctx):
     if not args: return await u.message.reply_text("❌ Usage: /start <moviecode>")
     code=args[0].lower()
     try:
-        mem=await ctx.bot.get_chat_member(MAIN_CH,usr)
+        mem=await ctx.bot.get_chat_member(MAIN_CHANNEL,usr)
         if mem.status not in ["member","administrator","creator"]: raise
     except:
-        kb=[[InlineKeyboardButton("🎬 Join Channel",url=f"https://t.me/{MAIN_CH.lstrip('@')}")],
+        kb=[[InlineKeyboardButton("🎬 Join Channel",url=f"https://t.me/{MAIN_CHANNEL.lstrip('@')}")],
             [InlineKeyboardButton("🔄 Retry",callback_data=f"retry_{code}")]]
         return await u.message.reply_text("Join our channel first.",reply_markup=InlineKeyboardMarkup(kb))
     if code not in movies: return await u.message.reply_text("❌ Invalid code.")
