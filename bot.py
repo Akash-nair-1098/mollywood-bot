@@ -266,14 +266,14 @@ async def on_alt_btn(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
             logger.info(f"Cancelled upload for user {uid}")
         except Exception as e:
             logger.error(f"Failed to save pending.json in on_alt_btn cancel: {e}")
-        await u.callback_query.edit_message_text("✅ Upload cancelled.")
+            await u.callback_query.edit_message_text("✅ Upload cancelled.")
     elif u.callback_query.data == "poster_retry":
         data["stage"] = "poster"
         try:
             save(PENDING, pending)
             logger.info(f"Retrying poster for user {uid}")
         except Exception as e:
-            logger.error(f"Failed to save pending.json in on_alt'}</xaiArtifact_btn poster_retry: {e}")
+            logger.error(f"Failed to save pending.json in on_alt_btn poster_retry: {e}")
             await u.callback_query.edit_message_text("❌ Error saving state. Please try /upload again.")
             return
         await u.callback_query.edit_message_text("✅ Retrying. Send or forward the movie poster (photo with optional caption or text only).")
