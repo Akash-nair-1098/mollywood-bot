@@ -35,18 +35,21 @@ async def cmd_upload(u,ctx):
     await u.message.reply_text("Choose mode:",reply_markup=InlineKeyboardMarkup(kb))
 
 # — STEP 1: Handle Single vs Multi
-async def on_type(u,ctx):
+async def on_type(u, ctx):
     await u.answer()
-    data = pending[str(u.from_user.id)] = {"type":None,"files":{}, "stage":"files"}
-    data["type"] = "single" if u.data=="t_single" else "multi"
-    if data["type"]=="single": data["files"]=[]
-    await u.edit_message_text("📥 Send all movie files now." if data["type"]=="single"
-                              else "📥 Send as:
-<LanguageName>
-[file1]
-[file2]
-...")
-    save(PENDING,pending)
+    data = pending[str(u.from_user.id)] = {"type": None, "files": {}, "stage": "files"}
+    data["type"] = "single" if u.data == "t_single" else "multi"
+    if data["type"] == "single":
+        data["files"] = []
+
+    message = (
+        "📥 Send all movie files now." if data["type"] == "single"
+        else "📥 Send as:\n<LanguageName>\n[file1]\n[file2]\n..."
+    )
+
+    await u.edit_message_text(message)
+    save(PENDING, pending)
+
 
 # — STEP 2: Admin Sends Content
 async def on_file_or_text(u,ctx):
