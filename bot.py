@@ -76,23 +76,58 @@ async def on_file_or_text(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
        (data["type"] == "multi" and len(data["files"]) > 0 and any(len(files) > 0 for files in data["files"].values())):
         data["stage"] = "poster"
         save(PENDING, pending)
-        await msg.reply_text("✅ Files received. 📌 Now send the movie poster as a **photo** with caption or as **text only**.")
+        kb = [[InlineKeyboardButton("📌 Send Poster", callback_data="poster_send")],
+              [InlineKeyboardButton("➡️ Forward Poster", callback_data="poster_forward")]]
+        await msg.reply_text("✅ Files received. Choose poster option:", reply_markup=InlineKeyboardMarkup(kb))
 
-# — STEP 3: Poster Upload
+# — STEP 3: Poster Option Selection
+async def on_poster_option(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await u.callback_query.answer()
+    uid = str(u.effective_user.id)
+    if uid not in pending or pending[uid]["stage"] != "poster":
+        await u.callback_query.edit_message_text("❌ Invalid action.")
+        return
+    data = pending[uid]
+    if u.callback_query.data == "poster_send":
+        data["poster_mode"] = "send"
+        await u.callback_query.edit_message_text(
+            "📌 Send the movie poster as a **photo** with caption or as **text only**."
+        )
+    else:
+        data["poster_mode"] = "forward"
+        await u.callback_query.edit_message_text(
+            "➡️ Forward the poster message now."
+        )
+    save(PENDING, pending)
+
+# — STEP 4: Poster Upload or Forward
 async def on_poster(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
     if u.effective_user.id != ADMIN_ID or uid not in pending: return
     data = pending[uid]
     if data["stage"] != "poster": return
     msg = u.message
-    data["poster"] = msg.caption or msg.text or ""
-    if msg.photo: 
-        data["photo"] = msg.photo[-1].file_id
+
+    if data.get("poster_mode") == "send":
+        if msg.photo or msg.text:
+            data["poster"] = msg.caption or msg.text or ""
+            if msg.photo:
+                data["photo"] = msg.photo[-1].file_id
+    elif data.get("poster_mode") == "forward" and msg.forward_from_message_id:
+        data["poster"] = msg.caption or msg.text or ""
+        if msg.photo:
+            data["photo"] = msg.photo[-1].file_id
+        data["forwarded_message_id"] = msg.message_id
+        data["forwarded_chat_id"] = msg.chat_id
+    else:
+        await msg.reply_text("⚠️ Please send a photo with caption, text, or forward a message.")
+        return
+
     data["stage"] = "code"
     save(PENDING, pending)
     await msg.reply_text("🔢 Now send a unique movie-code:")
 
-# — STEP 4: Receive movie-code
+# — STEP 5: Receive movie-code
 async def on_code(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
     if u.effective_user.id != ADMIN_ID or uid not in pending: return
@@ -109,7 +144,7 @@ async def on_code(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
           [InlineKeyboardButton("⏭ Skip", callback_data="alt_skip")]]
     await u.message.reply_text("🎥 Alternate link?", reply_markup=InlineKeyboardMarkup(kb))
 
-# — STEP 5: Optional Alt Link Buttons
+# — STEP 6: Optional Alt Link Buttons
 async def on_alt_btn(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.from_user.id)
     data = pending[uid]
@@ -122,7 +157,7 @@ async def on_alt_btn(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await u.callback_query.edit_message_text("🔗 Send alternate link now.")
     save(PENDING, pending)
 
-# — STEP 6: Receive Alt Link Input
+# — STEP 7: Receive Alt Link Input
 async def on_alt_input(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
     if u.effective_user.id != ADMIN_ID or uid not in pending: return
@@ -145,19 +180,31 @@ async def finalize(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
         kb.append([InlineKeyboardButton("📥 If bot not responding...", url=d["alt_link"])])
 
     markup = InlineKeyboardMarkup(kb)
-    if d.get("photo"):
-        msg = await ctx.bot.send_photo(
-            chat_id=u.effective_chat.id, 
-            photo=d["photo"], 
-            caption=d["poster"], 
+    if d.get("poster_mode") == "forward" and d.get("forwarded_message_id"):
+        msg = await ctx.bot.forward_message(
+            chat_id=u.effective_chat.id,
+            from_chat_id=d["forwarded_chat_id"],
+            message_id=d["forwarded_message_id"]
+        )
+        await ctx.bot.edit_message_reply_markup(
+            chat_id=msg.chat_id,
+            message_id=msg.message_id,
             reply_markup=markup
         )
     else:
-        msg = await ctx.bot.send_message(
-            chat_id=u.effective_chat.id, 
-            text=d["poster"], 
-            reply_markup=markup
-        )
+        if d.get("photo"):
+            msg = await ctx.bot.send_photo(
+                chat_id=u.effective_chat.id, 
+                photo=d["photo"], 
+                caption=d["poster"], 
+                reply_markup=markup
+            )
+        else:
+            msg = await ctx.bot.send_message(
+                chat_id=u.effective_chat.id, 
+                text=d["poster"], 
+                reply_markup=markup
+            )
     await ctx.bot.forward_message(
         chat_id=MAIN_CHANNEL, 
         from_chat_id=msg.chat_id, 
@@ -235,7 +282,8 @@ def main():
     app.add_handler(CommandHandler("upload", cmd_upload))
     app.add_handler(CallbackQueryHandler(on_type, pattern="^t_"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, on_file_or_text))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, on_poster))
+    app.add_handler(CallbackQueryHandler(on_poster_option, pattern="^poster_"))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT | filters.FORWARDED), on_poster))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^[a-zA-Z0-9_-]+$"), on_code))
     app.add_handler(CallbackQueryHandler(on_alt_btn, pattern="^alt_"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^https?://"), on_alt_input))
