@@ -36,6 +36,7 @@ def save(fn, data):
             json.dump(data, f, indent=2)
     except Exception as e:
         logger.error(f"Error saving {fn}: {e}")
+        raise
 
 movies = load(MOVIES)
 pending = load(PENDING)
@@ -63,7 +64,13 @@ async def on_type(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if data["type"] == "single":
         data["files"] = []
 
-    save(PENDING, pending)
+    try:
+        save(PENDING, pending)
+        logger.info(f"Started upload for user {uid}, type: {data['type']}")
+    except Exception as e:
+        logger.error(f"Failed to save pending.json in on_type: {e}")
+        await u.callback_query.edit_message_text("❌ Error saving state. Please try /upload again.")
+        return
 
     message = (
         "📥 Send all movie files now." if data["type"] == "single"
@@ -103,16 +110,28 @@ async def on_file_or_text(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text("⚠️ Please send a file.")
             return
 
-    save(PENDING, pending)
+    try:
+        save(PENDING, pending)
+        logger.info(f"Saved file for user {uid}, files: {data['files']}")
+    except Exception as e:
+        logger.error(f"Failed to save pending.json in on_file_or_text: {e}")
+        await msg.reply_text("❌ Error saving files. Please try /upload again.")
+        return
 
     # Automatically transition to poster stage if files received
     if (data["type"] == "single" and len(data["files"]) > 0) or \
        (data["type"] == "multi" and len(data["files"]) > 0 and any(len(files) > 0 for files in data["files"].values())):
         data["stage"] = "poster"
-        save(PENDING, pending)
+        try:
+            save(PENDING, pending)
+            logger.info(f"Transitioned to poster stage for user {uid}")
+        except Exception as e:
+            logger.error(f"Failed to save pending.json in on_file_or_text transition: {e}")
+            await msg.reply_text("❌ Error saving state. Please try /upload again.")
+            return
         await msg.reply_text("✅ Files received. Now send or forward the movie poster (photo with optional caption or text only).")
 
-# — STEP 3: Poster Upload or Forward (Updated)
+# — STEP 3: Poster Upload or Forward
 async def on_poster(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
     if u.effective_user.id != ADMIN_ID or uid not in pending:
@@ -133,17 +152,26 @@ async def on_poster(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
             data["forwarded_message_id"] = msg.message_id
             data["forwarded_chat_id"] = msg.chat_id
             data["poster_mode"] = "forward"
+            logger.info(f"Processed forwarded poster for user {uid}")
         elif msg.photo or msg.text:  # Handle direct photo or text
             data["poster"] = msg.caption or msg.text or ""
             data["photo"] = msg.photo[-1].file_id if msg.photo else None
             data["poster_mode"] = "send"
+            logger.info(f"Processed direct poster for user {uid}")
         else:
+            logger.warning(f"Invalid poster input from user {uid}: {msg}")
             await msg.reply_text("⚠️ Please send a photo with optional caption, text only, or forward a message.")
             return
 
         data["stage"] = "code"
-        save(PENDING, pending)
-        await msg.reply_text("🔢 Now send a unique movie-code (alphanumeric):")
+        try:
+            save(PENDING, pending)
+            logger.info(f"Saved poster for user {uid}, transitioning to code stage")
+        except Exception as e:
+            logger.error(f"Failed to save pending.json in on_poster: {e}")
+            await msg.reply_text("❌ Error saving poster. Please try /upload again.")
+            return
+        await msg.reply_text("🔢 Now send a unique movie-code (alphanumeric, e.g., movie123):")
     except Exception as e:
         logger.error(f"Error in on_poster: {e}")
         kb = [[InlineKeyboardButton("🔄 Retry Poster", callback_data="poster_retry")],
@@ -153,26 +181,40 @@ async def on_poster(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(kb)
         )
 
-# — STEP 4: Receive Movie Code
+# — STEP 4: Receive Movie Code (Fixed)
 async def on_code(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
     if u.effective_user.id != ADMIN_ID or uid not in pending:
+        logger.warning(f"Invalid code attempt by user {uid}")
         await u.message.reply_text("❌ Unauthorized or no active upload.")
         return
     data = pending[uid]
     if data["stage"] != "code":
+        logger.warning(f"Wrong stage for code: {data['stage']}")
         await u.message.reply_text("❌ Wrong stage. Use /upload to start over or /cancel to reset.")
         return
     code = u.message.text.strip().lower()
+    logger.info(f"Received movie code: {code} from user {uid}")
+    
     if not code.isalnum():
-        await u.message.reply_text("❌ Code must be alphanumeric (letters and numbers only).")
+        logger.warning(f"Invalid code format: {code}")
+        await u.message.reply_text("❌ Code must be alphanumeric (letters and numbers only, e.g., movie123). Try again.")
         return
     if code in movies:
+        logger.warning(f"Duplicate code: {code}")
         await u.message.reply_text("❌ Code already exists. Choose a different code.")
         return
+    
     data["code"] = code
     data["stage"] = "altlink"
-    save(PENDING, pending)
+    try:
+        save(PENDING, pending)
+        logger.info(f"Saved movie code: {code}, transitioning to altlink stage for user {uid}")
+    except Exception as e:
+        logger.error(f"Failed to save pending.json in on_code: {e}")
+        await u.message.reply_text("❌ Error saving code. Please try /upload again.")
+        return
+    
     kb = [[InlineKeyboardButton("➕ Add Alternate Link", callback_data="alt_provide")],
           [InlineKeyboardButton("⏭ Skip", callback_data="alt_skip")],
           [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]]
@@ -183,52 +225,97 @@ async def on_alt_btn(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await u.callback_query.answer()
     uid = str(u.effective_user.id)
     if u.effective_user.id != ADMIN_ID or uid not in pending:
+        logger.warning(f"Invalid alt_btn attempt by user {uid}")
         await u.callback_query.edit_message_text("❌ Invalid action.")
         return
     data = pending[uid]
     if u.callback_query.data == "alt_skip":
         data["alt_link"] = None
+        logger.info(f"Skipped alternate link for user {uid}")
         await finalize(u, ctx)
     elif u.callback_query.data == "alt_provide":
         data["stage"] = "altwait"
+        try:
+            save(PENDING, pending)
+            logger.info(f"Transitioned to altwait stage for user {uid}")
+        except Exception as e:
+            logger.error(f"Failed to save pending.json in on_alt_btn: {e}")
+            await u.callback_query.edit_message_text("❌ Error saving state. Please try /upload again.")
+            return
         await u.callback_query.edit_message_text("🔗 Send the alternate link now (must start with http:// or https://):")
     elif u.callback_query.data == "cancel":
         del pending[uid]
-        save(PENDING, pending)
+        try:
+            save(PENDING, pending)
+            logger.info(f"Cancelled upload for user {uid}")
+        except Exception as e:
+            logger.error(f"Failed to save pending.json in on_alt_btn cancel: {e}")
         await u.callback_query.edit_message_text("✅ Upload cancelled.")
     elif u.callback_query.data == "poster_retry":
         data["stage"] = "poster"
-        save(PENDING, pending)
+        try:
+            save(PENDING, pending)
+            logger.info(f"Retrying poster for user {uid}")
+        except Exception as e:
+            logger.error(f"Failed to save pending.json in on_alt_btn poster_retry: {e}")
+            await u.callback_query.edit_message_text("❌ Error saving state. Please try /upload again.")
+            return
         await u.callback_query.edit_message_text("✅ Retrying. Send or forward the movie poster (photo with optional caption or text only).")
-    save(PENDING, pending)
+    try:
+        save(PENDING, pending)
+    except Exception as e:
+        logger.error(f"Failed to save pending.json in on_alt_btn: {e}")
+        await u.callback_query.edit_message_text("❌ Error saving state. Please try /upload again.")
 
 # — STEP 6: Receive Alternate Link Input
 async def on_alt_input(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
     if u.effective_user.id != ADMIN_ID or uid not in pending:
+        logger.warning(f"Invalid alt_input attempt by user {uid}")
         await u.message.reply_text("❌ Unauthorized or no active upload.")
         return
     data = pending[uid]
     if data["stage"] != "altwait":
+        logger.warning(f"Wrong stage for alt_input: {data['stage']}")
         await u.message.reply_text("❌ Wrong stage. Use /upload to start over or /cancel to reset.")
         return
-    if not u.message.text.startswith(("http://", "https://")):
+    link = u.message.text.strip()
+    if not link.startswith(("http://", "https://")):
+        logger.warning(f"Invalid URL: {link}")
         await u.message.reply_text("⚠️ Please send a valid URL starting with http:// or https://")
         return
-    data["alt_link"] = u.message.text.strip()
+    data["alt_link"] = link
+    logger.info(f"Received alternate link: {link} for user {uid}")
+    try:
+        save(PENDING, pending)
+        logger.info(f"Saved alternate link for user {uid}")
+    except Exception as e:
+        logger.error(f"Failed to save pending.json in on_alt_input: {e}")
+        await u.message.reply_text("❌ Error saving link. Please try /upload again.")
+        return
     await finalize(u, ctx)
-    save(PENDING, pending)
 
-# — Finalize and Post
+# — STEP 7: Finalize and Post
 async def finalize(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
     if u.effective_user.id != ADMIN_ID or uid not in pending:
+        logger.warning(f"Invalid finalize attempt by user {uid}")
         await u.effective_chat.send_message("❌ Invalid action.")
         return
     d = pending.pop(uid)
+    if not d.get("code"):
+        logger.error(f"No code found in pending data for user {uid}")
+        await u.effective_chat.send_message("❌ No movie code found. Please try /upload again.")
+        return
     movies[d["code"]] = d
-    save(MOVIES, movies)
-    save(PENDING, pending)
+    try:
+        save(MOVIES, movies)
+        save(PENDING, pending)
+        logger.info(f"Saved movie data for code: {d['code']} for user {uid}")
+    except Exception as e:
+        logger.error(f"Failed to save movies.json or pending.json in finalize: {e}")
+        await u.effective_chat.send_message("❌ Error saving movie data. Please try /upload again.")
+        return
 
     kb = [[InlineKeyboardButton("▶️ Get Movie", url=f"https://t.me/{ctx.bot.username}?start={d['code']}")]]
     if d.get("alt_link"):
@@ -247,6 +334,7 @@ async def finalize(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 message_id=msg.message_id,
                 reply_markup=markup
             )
+            logger.info(f"Forwarded poster to admin chat for user {uid}")
         else:
             if d.get("photo"):
                 msg = await ctx.bot.send_photo(
@@ -255,23 +343,29 @@ async def finalize(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     caption=d["poster"],
                     reply_markup=markup
                 )
+                logger.info(f"Sent photo poster to admin chat for user {uid}")
             else:
                 msg = await ctx.bot.send_message(
                     chat_id=u.effective_chat.id,
                     text=d["poster"],
                     reply_markup=markup
                 )
+                logger.info(f"Sent text poster to admin chat for user {uid}")
         # Forward to main channel
         await ctx.bot.forward_message(
             chat_id=MAIN_CHANNEL,
             from_chat_id=msg.chat_id,
             message_id=msg.message_id
         )
+        logger.info(f"Forwarded poster to main channel for user {uid}, code: {d['code']}")
         await u.effective_chat.send_message("✅ Movie posted successfully to the main channel!")
     except Exception as e:
         logger.error(f"Error in finalize: {e}")
         movies.pop(d["code"], None)  # Revert movie save on failure
-        save(MOVIES, movies)
+        try:
+            save(MOVIES, movies)
+        except Exception as e:
+            logger.error(f"Failed to save movies.json after revert in finalize: {e}")
         await u.effective_chat.send_message(
             "❌ Failed to post movie. Use /upload to try again or /cancel to reset."
         )
@@ -284,7 +378,11 @@ async def cmd_cancel(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
     if uid in pending:
         del pending[uid]
-        save(PENDING, pending)
+        try:
+            save(PENDING, pending)
+            logger.info(f"Cancelled upload for user {uid}")
+        except Exception as e:
+            logger.error(f"Failed to save pending.json in cmd_cancel: {e}")
         await u.message.reply_text("✅ Upload process cancelled.")
     else:
         await u.message.reply_text("❌ No active upload process to cancel.")
@@ -356,7 +454,11 @@ async def cmd_delete(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await u.message.reply_text("❌ Usage: /delete <code>")
         return
     del movies[c]
-    save(MOVIES, movies)
+    try:
+        save(MOVIES, movies)
+        logger.info(f"Deleted movie code: {c}")
+    except Exception as e:
+        logger.error(f"Failed to save movies.json in cmd_delete: {e}")
     await u.message.reply_text(f"✅ Deleted `{c}`")
 
 async def cmd_status(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -370,7 +472,7 @@ def main():
     app.add_handler(CallbackQueryHandler(on_type, pattern="^t_"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & (filters.Document.ALL | filters.TEXT), on_file_or_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT | filters.FORWARDED), on_poster))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^[a-zA-Z0-9]+$"), on_code))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_code))
     app.add_handler(CallbackQueryHandler(on_alt_btn, pattern="^(alt_|cancel|poster_retry)"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^https?://"), on_alt_input))
     app.add_handler(CommandHandler("start", cmd_start))
