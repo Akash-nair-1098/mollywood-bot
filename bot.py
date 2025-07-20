@@ -171,7 +171,7 @@ async def on_poster(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to save pending.json in on_poster: {e}")
             await msg.reply_text("❌ Error saving poster. Please try /upload again.")
             return
-        await msg.reply_text("🔢 Now send a unique movie-code (alphanumeric, e.g., movie123):")
+        await msg.reply_text("🔢 Now send a unique movie-code (alphanumeric, e.g., Unitedkingdomofkerala2025):")
     except Exception as e:
         logger.error(f"Error in on_poster: {e}")
         kb = [[InlineKeyboardButton("🔄 Retry Poster", callback_data="poster_retry")],
@@ -194,14 +194,18 @@ async def on_code(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await u.message.reply_text("❌ Wrong stage. Use /upload to start over or /cancel to reset.")
         return
     code = u.message.text.strip().lower()
-    logger.info(f"Received movie code: {code} from user {uid}")
+    logger.info(f"Received movie code: '{code}' from user {uid}")
     
+    if not code:
+        logger.warning(f"Empty code received from user {uid}")
+        await u.message.reply_text("❌ Code cannot be empty. Try again (e.g., Unitedkingdomofkerala2025).")
+        return
     if not code.isalnum():
-        logger.warning(f"Invalid code format: {code}")
-        await u.message.reply_text("❌ Code must be alphanumeric (letters and numbers only, e.g., movie123). Try again.")
+        logger.warning(f"Invalid code format: '{code}'")
+        await u.message.reply_text("❌ Code must be alphanumeric (letters and numbers only, e.g., Unitedkingdomofkerala2025). Try again.")
         return
     if code in movies:
-        logger.warning(f"Duplicate code: {code}")
+        logger.warning(f"Duplicate code: '{code}'")
         await u.message.reply_text("❌ Code already exists. Choose a different code.")
         return
     
@@ -209,7 +213,7 @@ async def on_code(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data["stage"] = "altlink"
     try:
         save(PENDING, pending)
-        logger.info(f"Saved movie code: {code}, transitioning to altlink stage for user {uid}")
+        logger.info(f"Saved movie code: '{code}', transitioning to altlink stage for user {uid}")
     except Exception as e:
         logger.error(f"Failed to save pending.json in on_code: {e}")
         await u.message.reply_text("❌ Error saving code. Please try /upload again.")
@@ -218,7 +222,7 @@ async def on_code(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     kb = [[InlineKeyboardButton("➕ Add Alternate Link", callback_data="alt_provide")],
           [InlineKeyboardButton("⏭ Skip", callback_data="alt_skip")],
           [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]]
-    await u.message.reply_text("🎥 Provide an alternate link (optional):", reply_markup=InlineKeyboardMarkup(kb))
+    await u.message.reply_text(f"✅ Code '{code}' received. Provide an alternate link (optional):", reply_markup=InlineKeyboardMarkup(kb))
 
 # — STEP 5: Optional Alternate Link Buttons
 async def on_alt_btn(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -281,11 +285,11 @@ async def on_alt_input(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     link = u.message.text.strip()
     if not link.startswith(("http://", "https://")):
-        logger.warning(f"Invalid URL: {link}")
+        logger.warning(f"Invalid URL: '{link}' from user {uid}")
         await u.message.reply_text("⚠️ Please send a valid URL starting with http:// or https://")
         return
     data["alt_link"] = link
-    logger.info(f"Received alternate link: {link} for user {uid}")
+    logger.info(f"Received alternate link: '{link}' for user {uid}")
     try:
         save(PENDING, pending)
         logger.info(f"Saved alternate link for user {uid}")
@@ -311,7 +315,7 @@ async def finalize(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         save(MOVIES, movies)
         save(PENDING, pending)
-        logger.info(f"Saved movie data for code: {d['code']} for user {uid}")
+        logger.info(f"Saved movie data for code: '{d['code']}' for user {uid}")
     except Exception as e:
         logger.error(f"Failed to save movies.json or pending.json in finalize: {e}")
         await u.effective_chat.send_message("❌ Error saving movie data. Please try /upload again.")
@@ -357,7 +361,7 @@ async def finalize(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
             from_chat_id=msg.chat_id,
             message_id=msg.message_id
         )
-        logger.info(f"Forwarded poster to main channel for user {uid}, code: {d['code']}")
+        logger.info(f"Forwarded poster to main channel for user {uid}, code: '{d['code']}'")
         await u.effective_chat.send_message("✅ Movie posted successfully to the main channel!")
     except Exception as e:
         logger.error(f"Error in finalize: {e}")
@@ -456,7 +460,7 @@ async def cmd_delete(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     del movies[c]
     try:
         save(MOVIES, movies)
-        logger.info(f"Deleted movie code: {c}")
+        logger.info(f"Deleted movie code: '{c}'")
     except Exception as e:
         logger.error(f"Failed to save movies.json in cmd_delete: {e}")
     await u.message.reply_text(f"✅ Deleted `{c}`")
