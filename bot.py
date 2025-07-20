@@ -47,8 +47,24 @@ async def on_type(u, ctx):
         else "📥 Send as:\n<LanguageName>\n[file1]\n[file2]\n..."
     )
 
-    await u.callback_query.edit_message_text(message)
+        await u.callback_query.edit_message_text(
+        message,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Done", callback_data="done_files")]
+        ])
+    )
     save(PENDING, pending)
+
+    async def on_done_files(u, ctx):
+    await u.callback_query.answer()
+    uid = str(u.effective_user.id)
+    if uid not in pending or pending[uid]["stage"] != "files":
+        return await u.callback_query.edit_message_text("❌ You haven't started uploading files.")
+    
+    pending[uid]["stage"] = "poster"
+    save(PENDING, pending)
+    await u.callback_query.edit_message_text("✅ Files received. 📌 Now send the movie **poster** as photo (with caption) or just a text.")
+
 
 
 # — STEP 2: Admin Sends Content
@@ -197,6 +213,7 @@ def main():
     app.add_handler(CommandHandler("upload",cmd_upload))
     app.add_handler(CallbackQueryHandler(on_type,pattern="^t_"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, on_file_or_text))
+    app.add_handler(CallbackQueryHandler(on_done_files, pattern="^done_files$"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.PHOTO, on_poster))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^[a-zA-Z0-9_-]+$"), on_code))
     app.add_handler(CallbackQueryHandler(on_alt_btn,pattern="^alt_"))
