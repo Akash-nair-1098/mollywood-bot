@@ -32,7 +32,8 @@ def load(fn):
 
 def save(fn, data): 
     try:
-        open(fn, "w").write(json.dumps(data, indent=2))
+        with open(fn, "w") as f:
+            json.dump(data, f, indent=2)
     except Exception as e:
         logger.error(f"Error saving {fn}: {e}")
 
@@ -109,106 +110,75 @@ async def on_file_or_text(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
        (data["type"] == "multi" and len(data["files"]) > 0 and any(len(files) > 0 for files in data["files"].values())):
         data["stage"] = "poster"
         save(PENDING, pending)
-        kb = [[InlineKeyboardButton("📌 Send Poster", callback_data="poster_send")],
-              [InlineKeyboardButton("➡️ Forward Poster", callback_data="poster_forward")],
-              [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]]
-        await msg.reply_text("✅ Files received. Choose poster option:", reply_markup=InlineKeyboardMarkup(kb))
+        await msg.reply_text("✅ Files received. Now send or forward the movie poster (photo with optional caption or text only).")
 
-# — STEP 3: Poster Option Selection
-async def on_poster_option(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await u.callback_query.answer()
-    uid = str(u.effective_user.id)
-    if u.effective_user.id != ADMIN_ID or uid not in pending or pending[uid]["stage"] != "poster":
-        await u.callback_query.edit_message_text("❌ Invalid action.")
-        return
-    data = pending[uid]
-    if u.callback_query.data == "poster_send":
-        data["poster_mode"] = "send"
-        await u.callback_query.edit_message_text(
-            "📌 Send the movie poster as a **photo** with caption or as **text only**."
-        )
-    elif u.callback_query.data == "poster_forward":
-        data["poster_mode"] = "forward"
-        await u.callback_query.edit_message_text(
-            "➡️ Forward the poster message now."
-        )
-    elif u.callback_query.data == "cancel":
-        del pending[uid]
-        save(PENDING, pending)
-        await u.callback_query.edit_message_text("✅ Upload cancelled.")
-    save(PENDING, pending)
-
-# — STEP 4: Poster Upload or Forward (Fixed)
+# — STEP 3: Poster Upload or Forward (Updated)
 async def on_poster(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
     if u.effective_user.id != ADMIN_ID or uid not in pending:
         logger.warning(f"Invalid poster attempt by user {uid}")
+        await u.message.reply_text("❌ Unauthorized or no active upload.")
         return
     data = pending[uid]
     if data["stage"] != "poster":
         logger.warning(f"Wrong stage for poster: {data['stage']}")
+        await u.message.reply_text("❌ Wrong stage. Use /upload to start over or /cancel to reset.")
         return
     msg = u.message
 
     try:
-        if data.get("poster_mode") == "send":
-            if msg.photo:
-                data["poster"] = msg.caption or ""
-                data["photo"] = msg.photo[-1].file_id
-            elif msg.text:
-                data["poster"] = msg.text
-                data["photo"] = None
-            else:
-                await msg.reply_text("⚠️ Please send a photo with caption or text only.")
-                return
-        elif data.get("poster_mode") == "forward":
-            if not msg.forward_from_message_id:
-                await msg.reply_text("⚠️ Please forward a message containing a photo or text.")
-                return
+        if msg.forward_from_message_id:  # Handle forwarded message
             data["poster"] = msg.caption or msg.text or ""
             data["photo"] = msg.photo[-1].file_id if msg.photo else None
             data["forwarded_message_id"] = msg.message_id
             data["forwarded_chat_id"] = msg.chat_id
+            data["poster_mode"] = "forward"
+        elif msg.photo or msg.text:  # Handle direct photo or text
+            data["poster"] = msg.caption or msg.text or ""
+            data["photo"] = msg.photo[-1].file_id if msg.photo else None
+            data["poster_mode"] = "send"
         else:
-            await msg.reply_text("⚠️ Invalid poster mode. Please start over with /upload.")
+            await msg.reply_text("⚠️ Please send a photo with optional caption, text only, or forward a message.")
             return
 
         data["stage"] = "code"
         save(PENDING, pending)
-        await msg.reply_text("🔢 Now send a unique movie-code:")
+        await msg.reply_text("🔢 Now send a unique movie-code (alphanumeric):")
     except Exception as e:
         logger.error(f"Error in on_poster: {e}")
         kb = [[InlineKeyboardButton("🔄 Retry Poster", callback_data="poster_retry")],
               [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]]
         await msg.reply_text(
-            "❌ An error occurred while processing the poster. Please retry or cancel.",
+            "❌ Error processing poster. Please retry or cancel.",
             reply_markup=InlineKeyboardMarkup(kb)
         )
 
-# — STEP 5: Receive movie-code
+# — STEP 4: Receive Movie Code
 async def on_code(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
-    if u.effective_user.id != ADMIN_ID or uid not in pending: 
+    if u.effective_user.id != ADMIN_ID or uid not in pending:
+        await u.message.reply_text("❌ Unauthorized or no active upload.")
         return
     data = pending[uid]
-    if data["stage"] != "code": 
+    if data["stage"] != "code":
+        await u.message.reply_text("❌ Wrong stage. Use /upload to start over or /cancel to reset.")
         return
     code = u.message.text.strip().lower()
-    if not code.isalnum():  # Ensure code is alphanumeric
-        await u.message.reply_text("❌ Code must be alphanumeric.")
+    if not code.isalnum():
+        await u.message.reply_text("❌ Code must be alphanumeric (letters and numbers only).")
         return
-    if code in movies: 
-        await u.message.reply_text("❌ Code already exists.")
+    if code in movies:
+        await u.message.reply_text("❌ Code already exists. Choose a different code.")
         return
     data["code"] = code
     data["stage"] = "altlink"
     save(PENDING, pending)
-    kb = [[InlineKeyboardButton("➕ Add Link", callback_data="alt_provide")],
+    kb = [[InlineKeyboardButton("➕ Add Alternate Link", callback_data="alt_provide")],
           [InlineKeyboardButton("⏭ Skip", callback_data="alt_skip")],
           [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]]
-    await u.message.reply_text("🎥 Alternate link?", reply_markup=InlineKeyboardMarkup(kb))
+    await u.message.reply_text("🎥 Provide an alternate link (optional):", reply_markup=InlineKeyboardMarkup(kb))
 
-# — STEP 6: Optional Alt Link Buttons
+# — STEP 5: Optional Alternate Link Buttons
 async def on_alt_btn(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await u.callback_query.answer()
     uid = str(u.effective_user.id)
@@ -221,7 +191,7 @@ async def on_alt_btn(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await finalize(u, ctx)
     elif u.callback_query.data == "alt_provide":
         data["stage"] = "altwait"
-        await u.callback_query.edit_message_text("🔗 Send alternate link now.")
+        await u.callback_query.edit_message_text("🔗 Send the alternate link now (must start with http:// or https://):")
     elif u.callback_query.data == "cancel":
         del pending[uid]
         save(PENDING, pending)
@@ -229,19 +199,18 @@ async def on_alt_btn(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif u.callback_query.data == "poster_retry":
         data["stage"] = "poster"
         save(PENDING, pending)
-        kb = [[InlineKeyboardButton("📌 Send Poster", callback_data="poster_send")],
-              [InlineKeyboardButton("➡️ Forward Poster", callback_data="poster_forward")],
-              [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]]
-        await u.callback_query.edit_message_text("✅ Retrying. Choose poster option:", reply_markup=InlineKeyboardMarkup(kb))
+        await u.callback_query.edit_message_text("✅ Retrying. Send or forward the movie poster (photo with optional caption or text only).")
     save(PENDING, pending)
 
-# — STEP 7: Receive Alt Link Input
+# — STEP 6: Receive Alternate Link Input
 async def on_alt_input(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
-    if u.effective_user.id != ADMIN_ID or uid not in pending: 
+    if u.effective_user.id != ADMIN_ID or uid not in pending:
+        await u.message.reply_text("❌ Unauthorized or no active upload.")
         return
     data = pending[uid]
-    if data["stage"] != "altwait": 
+    if data["stage"] != "altwait":
+        await u.message.reply_text("❌ Wrong stage. Use /upload to start over or /cancel to reset.")
         return
     if not u.message.text.startswith(("http://", "https://")):
         await u.message.reply_text("⚠️ Please send a valid URL starting with http:// or https://")
@@ -263,7 +232,7 @@ async def finalize(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     kb = [[InlineKeyboardButton("▶️ Get Movie", url=f"https://t.me/{ctx.bot.username}?start={d['code']}")]]
     if d.get("alt_link"):
-        kb.append([InlineKeyboardButton("📥 If bot not responding...", url=d["alt_link"])])
+        kb.append([InlineKeyboardButton("📥 Alternate Link", url=d["alt_link"])])
 
     markup = InlineKeyboardMarkup(kb)
     try:
@@ -281,26 +250,31 @@ async def finalize(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             if d.get("photo"):
                 msg = await ctx.bot.send_photo(
-                    chat_id=u.effective_chat.id, 
-                    photo=d["photo"], 
-                    caption=d["poster"], 
+                    chat_id=u.effective_chat.id,
+                    photo=d["photo"],
+                    caption=d["poster"],
                     reply_markup=markup
                 )
             else:
                 msg = await ctx.bot.send_message(
-                    chat_id=u.effective_chat.id, 
-                    text=d["poster"], 
+                    chat_id=u.effective_chat.id,
+                    text=d["poster"],
                     reply_markup=markup
                 )
+        # Forward to main channel
         await ctx.bot.forward_message(
-            chat_id=MAIN_CHANNEL, 
-            from_chat_id=msg.chat_id, 
+            chat_id=MAIN_CHANNEL,
+            from_chat_id=msg.chat_id,
             message_id=msg.message_id
         )
-        await u.effective_chat.send_message("✅ Movie posted successfully!")
+        await u.effective_chat.send_message("✅ Movie posted successfully to the main channel!")
     except Exception as e:
         logger.error(f"Error in finalize: {e}")
-        await u.effective_chat.send_message("❌ Failed to post movie. Please try again with /upload.")
+        movies.pop(d["code"], None)  # Revert movie save on failure
+        save(MOVIES, movies)
+        await u.effective_chat.send_message(
+            "❌ Failed to post movie. Use /upload to try again or /cancel to reset."
+        )
 
 # — /cancel Command
 async def cmd_cancel(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -319,13 +293,13 @@ async def cmd_cancel(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_start(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     usr = u.effective_user.id
     args = ctx.args or []
-    if not args: 
+    if not args:
         await u.message.reply_text("❌ Usage: /start <moviecode>")
         return
     code = args[0].lower()
     try:
         mem = await ctx.bot.get_chat_member(MAIN_CHANNEL, usr)
-        if mem.status not in ["member", "administrator", "creator"]: 
+        if mem.status not in ["member", "administrator", "creator"]:
             raise Exception
     except Exception as e:
         logger.warning(f"User {usr} not in channel: {e}")
@@ -333,7 +307,7 @@ async def cmd_start(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
               [InlineKeyboardButton("🔄 Retry", callback_data=f"retry_{code}")]]
         await u.message.reply_text("Join our channel first.", reply_markup=InlineKeyboardMarkup(kb))
         return
-    if code not in movies: 
+    if code not in movies:
         await u.message.reply_text("❌ Invalid code.")
         return
     d = movies[code]
@@ -347,7 +321,7 @@ async def cmd_start(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if d.get("alt_link"):
             await ctx.bot.send_message(
                 chat_id=u.effective_chat.id,
-                text=f"📥 If bot not responding, click here: {d['alt_link']}"
+                text=f"📥 Alternate Link: {d['alt_link']}"
             )
 
 # — Retry After Join
@@ -369,16 +343,16 @@ async def on_getlang(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if movies[code].get("alt_link"):
         await ctx.bot.send_message(
             chat_id=u.effective_chat.id,
-            text=f"📥 If bot not responding, click here: {movies[code]['alt_link']}"
+            text=f"📥 Alternate Link: {movies[code]['alt_link']}"
         )
 
 # — Admin Commands
 async def cmd_delete(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if u.effective_user.id != ADMIN_ID: 
+    if u.effective_user.id != ADMIN_ID:
         await u.message.reply_text("❌ Only admins can use this command.")
         return
     c = ctx.args and ctx.args[0].lower()
-    if not c or c not in movies: 
+    if not c or c not in movies:
         await u.message.reply_text("❌ Usage: /delete <code>")
         return
     del movies[c]
@@ -394,10 +368,9 @@ def main():
     app.add_handler(CommandHandler("upload", cmd_upload))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CallbackQueryHandler(on_type, pattern="^t_"))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, on_file_or_text))
-    app.add_handler(CallbackQueryHandler(on_poster_option, pattern="^(poster_|cancel)"))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & (filters.Document.ALL | filters.TEXT), on_file_or_text))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT | filters.FORWARDED), on_poster))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^[a-zA-Z0-9_-]+$"), on_code))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^[a-zA-Z0-9]+$"), on_code))
     app.add_handler(CallbackQueryHandler(on_alt_btn, pattern="^(alt_|cancel|poster_retry)"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^https?://"), on_alt_input))
     app.add_handler(CommandHandler("start", cmd_start))
