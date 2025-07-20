@@ -471,19 +471,32 @@ async def cmd_status(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Command handlers (prioritized first)
+    app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("upload", cmd_upload))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
-    app.add_handler(CallbackQueryHandler(on_type, pattern="^t_"))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & (filters.Document.ALL | filters.TEXT), on_file_or_text))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT | filters.FORWARDED), on_poster))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_code))
-    app.add_handler(CallbackQueryHandler(on_alt_btn, pattern="^(alt_|cancel|poster_retry)"))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^https?://"), on_alt_input))
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CallbackQueryHandler(on_retry, pattern="^retry_"))
-    app.add_handler(CallbackQueryHandler(on_getlang, pattern="^getlang_"))
     app.add_handler(CommandHandler("delete", cmd_delete))
     app.add_handler(CommandHandler("status", cmd_status))
+
+    # Callback handlers
+    app.add_handler(CallbackQueryHandler(on_type, pattern="^t_"))
+    app.add_handler(CallbackQueryHandler(on_alt_btn, pattern="^(alt_|cancel|poster_retry)"))
+    app.add_handler(CallbackQueryHandler(on_retry, pattern="^retry_"))
+    app.add_handler(CallbackQueryHandler(on_getlang, pattern="^getlang_"))
+
+    # Message handlers (ordered and filtered carefully)
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^https?://"), on_alt_input))
+
+    # Admin-only code entry (avoid catching regular user input)
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
+        on_code
+    ))
+
+    # Poster and file upload
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT | filters.FORWARDED), on_poster))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & (filters.Document.ALL | filters.TEXT), on_file_or_text))
 
     app.run_polling()
 
