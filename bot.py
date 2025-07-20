@@ -36,9 +36,9 @@ async def cmd_upload(u,ctx):
 
 # — STEP 1: Handle Single vs Multi
 async def on_type(u, ctx):
-    await u.answer()
-    data = pending[str(u.from_user.id)] = {"type": None, "files": {}, "stage": "files"}
-    data["type"] = "single" if u.data == "t_single" else "multi"
+    await u.callback_query.answer()
+    data = pending[str(u.effective_user.id)] = {"type": None, "files": {}, "stage": "files"}
+    data["type"] = "single" if u.callback_query.data == "t_single" else "multi"
     if data["type"] == "single":
         data["files"] = []
 
@@ -47,8 +47,7 @@ async def on_type(u, ctx):
         else "📥 Send as:\n<LanguageName>\n[file1]\n[file2]\n..."
     )
 
-    await u.edit_message_text(message)
-    print("✅ Mode selected:", data["type"])
+    await u.callback_query.edit_message_text(message)
     save(PENDING, pending)
 
 
