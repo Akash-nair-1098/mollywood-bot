@@ -35,9 +35,10 @@ async def cmd_upload(u, ctx):
     await u.message.reply_text("Choose mode:", reply_markup=InlineKeyboardMarkup(kb))
 
 # — STEP 1: Handle Single vs Multi
+# — STEP 1: Handle Single vs Multi
 async def on_type(u, ctx):
     await u.callback_query.answer()
-    uid = str(u.callback_query.from_user.id)
+    uid = str(u.effective_user.id)
     data = pending[uid] = {"type": None, "files": {}, "stage": "files"}
 
     data["type"] = "single" if u.callback_query.data == "t_single" else "multi"
@@ -46,10 +47,10 @@ async def on_type(u, ctx):
 
     save(PENDING, pending)
 
-message = (
-    "📥 Send all movie files now." if data["type"] == "single"
-    else "📥 Send as:\n<LanguageName>\n[file1]\n[file2]\n..."
-)
+    message = (
+        "📥 Send all movie files now." if data["type"] == "single"
+        else "📥 Send as:\n<LanguageName>\n[file1]\n[file2]\n..."
+    )
 
     await u.callback_query.edit_message_text(
         message,
@@ -57,6 +58,7 @@ message = (
             [InlineKeyboardButton("✅ Done", callback_data="done_files")]
         ])
     )
+
 
 # — STEP 2: Admin Sends Content
 async def on_file_or_text(u, ctx):
