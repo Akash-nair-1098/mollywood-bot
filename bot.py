@@ -48,6 +48,7 @@ async def on_type(u, ctx):
     )
 
     await u.edit_message_text(message)
+    print("✅ Mode selected:", data["type"])
     save(PENDING, pending)
 
 
