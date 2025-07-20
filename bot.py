@@ -46,14 +46,10 @@ async def on_type(u, ctx):
 
     save(PENDING, pending)
 
-    message = (
-        "📥 Send all movie files now." if data["type"] == "single"
-        else "📥 Send as:
-<LanguageName>
-[file1]
-[file2]
-..."
-    )
+message = (
+    "📥 Send all movie files now." if data["type"] == "single"
+    else "📥 Send as:\n<LanguageName>\n[file1]\n[file2]\n..."
+)
 
     await u.callback_query.edit_message_text(
         message,
