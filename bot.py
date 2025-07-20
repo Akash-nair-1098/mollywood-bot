@@ -73,8 +73,8 @@ async def on_type(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     message = (
-        "📥 Send all movie files now." if data["type"] == "single"
-        else "📥 Send as:\n<LanguageName>\n[file1]\n[file2]\n..."
+        "📥 Send all movie files now. When finished, use /done." if data["type"] == "single"
+        else "📥 Send language names followed by files for each language. When finished, use /done."
     )
     await u.callback_query.edit_message_text(message)
 
@@ -90,22 +90,23 @@ async def on_file_or_text(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = u.message
     if data["type"] == "multi":
         if msg.text:
-            data.setdefault("files", {})[msg.text.strip()] = []
-            data["current"] = msg.text.strip()
-            await msg.reply_text(f"✅ Language '{msg.text.strip()}' set. Now send files for this language.")
+            language = msg.text.strip()
+            data["files"][language] = data["files"].get(language, [])
+            data["current"] = language
+            await msg.reply_text(f"✅ Language '{language}' set. Now send files for this language.")
         elif msg.document:
             if "current" not in data: 
                 await msg.reply_text("⚠️ Send a language name first.")
                 return
             data["files"][data["current"]].append({"file_id": msg.document.file_id})
-            await msg.reply_text("✅ File received.")
+            await msg.reply_text(f"✅ File received for {data['current']}. Send more files for this language, switch to another language, or use /done when finished.")
         else:
             await msg.reply_text("⚠️ Please send a language name or a file.")
             return
     else:
         if msg.document:
             data["files"].append({"file_id": msg.document.file_id})
-            await msg.reply_text("✅ File received.")
+            await msg.reply_text("✅ File received. Send more files or use /done when finished.")
         else:
             await msg.reply_text("⚠️ Please send a file.")
             return
@@ -118,18 +119,29 @@ async def on_file_or_text(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("❌ Error saving files. Please try /upload again.")
         return
 
-    # Automatically transition to poster stage if files received
-    if (data["type"] == "single" and len(data["files"]) > 0) or \
-       (data["type"] == "multi" and len(data["files"]) > 0 and any(len(files) > 0 for files in data["files"].values())):
-        data["stage"] = "poster"
-        try:
-            save(PENDING, pending)
-            logger.info(f"Transitioned to poster stage for user {uid}")
-        except Exception as e:
-            logger.error(f"Failed to save pending.json in on_file_or_text transition: {e}")
-            await msg.reply_text("❌ Error saving state. Please try /upload again.")
-            return
-        await msg.reply_text("✅ Files received. Now send or forward the movie poster (photo with optional caption or text only).")
+# — STEP 2.5: Admin Signals Completion with /done
+async def cmd_done(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if u.effective_user.id != ADMIN_ID:
+        await u.message.reply_text("❌ Only admins can use this command.")
+        return
+    uid = str(u.effective_user.id)
+    if uid not in pending or pending[uid]["stage"] != "files":
+        await u.message.reply_text("❌ No active file upload in progress.")
+        return
+    data = pending[uid]
+    if (data["type"] == "single" and len(data["files"]) == 0) or \
+       (data["type"] == "multi" and not any(data["files"].values())):
+        await u.message.reply_text("❌ No files received yet. Send files first.")
+        return
+    data["stage"] = "poster"
+    try:
+        save(PENDING, pending)
+        logger.info(f"Transitioned to poster stage for user {uid} via /done")
+    except Exception as e:
+        logger.error(f"Failed to save pending.json in cmd_done: {e}")
+        await u.message.reply_text("❌ Error saving state. Please try /upload again.")
+        return
+    await u.message.reply_text("✅ Files received. Now send or forward the movie poster (photo with optional caption or text only).")
 
 # — STEP 3: Poster Upload or Forward
 async def on_poster(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -181,7 +193,7 @@ async def on_poster(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(kb)
         )
 
-# — STEP 4: Receive Movie Code (Fixed)
+# — STEP 4: Receive Movie Code
 async def on_code(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = str(u.effective_user.id)
     if u.effective_user.id != ADMIN_ID or uid not in pending:
@@ -261,7 +273,7 @@ async def on_alt_btn(u: Update, ctx: ContextTypes.DEFAULT_TYPE):
             save(PENDING, pending)
             logger.info(f"Retrying poster for user {uid}")
         except Exception as e:
-            logger.error(f"Failed to save pending.json in on_alt_btn poster_retry: {e}")
+            logger.error(f"Failed to save pending.json in on_alt'}</xaiArtifact_btn poster_retry: {e}")
             await u.callback_query.edit_message_text("❌ Error saving state. Please try /upload again.")
             return
         await u.callback_query.edit_message_text("✅ Retrying. Send or forward the movie poster (photo with optional caption or text only).")
@@ -478,6 +490,7 @@ def main():
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("delete", cmd_delete))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("done", cmd_done))
 
     # Callback handlers
     app.add_handler(CallbackQueryHandler(on_type, pattern="^t_"))
@@ -499,7 +512,6 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & (filters.Document.ALL | filters.TEXT), on_file_or_text))
 
     app.run_polling()
-
 
 if __name__ == "__main__":
     keep_alive()
