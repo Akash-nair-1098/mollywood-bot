@@ -276,23 +276,23 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CallbackQueryHandler(retry_join, pattern=r"^retry_"))
-app.add_handler(CommandHandler("status", status))
-app.add_handler(CommandHandler("delete", delete_movie))
-app.add_handler(CommandHandler("skip", skip_alternate_link))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(retry_join, pattern=r"^retry_"))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("delete", delete_movie))
+    app.add_handler(CommandHandler("skip", skip_alternate_link))
 
-# Handlers with specific filters first
-app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND & filters.Regex(r'^https?://'), handle_alternate_link))
-app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.Regex(r'^https?://'), handle_code))
+    # Handlers with specific filters first
+    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND & filters.Regex(r'^https?://'), handle_alternate_link))
+    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.Regex(r'^https?://'), handle_code))
 
-# Then general ones
-app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, handle_forwarded_file))
-app.add_handler(MessageHandler((filters.PHOTO | filters.FORWARDED | filters.TEXT) & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_poster))
-
+    # Then general ones
+    app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, handle_forwarded_file))
+    app.add_handler(MessageHandler((filters.PHOTO | filters.FORWARDED | filters.TEXT) & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_poster))
 
     print("✅ Bot is running...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
