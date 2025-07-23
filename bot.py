@@ -196,41 +196,31 @@ async def handle_poster(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     pending["stage"] = "alternate_link"
     save_json(PENDING_FILE, pending_data)
-    
-    btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📎 Send Alternate Link", callback_data="send_alternate_link")],
-        [InlineKeyboardButton("⏭ Skip", callback_data="skip_alternate_link")]
-    ])
-    await update.message.reply_text("🔗 Please send an alternate link or skip.", reply_markup=btn)
+    await update.message.reply_text("🔗 Please send an alternate link or type /skip to proceed to the movie code.")
 
-async def handle_alternate_link_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_key = str(query.from_user.id)
+async def skip_alternate_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    user_key = str(update.effective_user.id)
     pending = pending_data.get(user_key)
     if not pending or pending["stage"] != "alternate_link":
         return
 
-    if query.data == "send_alternate_link":
-        pending["stage"] = "waiting_for_link"
-        save_json(PENDING_FILE, pending_data)
-        await query.edit_message_text("🔗 Please send the alternate link.")
-    elif query.data == "skip_alternate_link":
-        pending["stage"] = "code"
-        save_json(PENDING_FILE, pending_data)
-        await query.edit_message_text("🔢 Now send the unique movie code for /start command.")
+    pending["stage"] = "code"
+    save_json(PENDING_FILE, pending_data)
+    await update.message.reply_text("🔢 Now send the unique movie code for /start command.")
 
 async def handle_alternate_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     user_key = str(update.effective_user.id)
     pending = pending_data.get(user_key)
-    if not pending or pending["stage"] != "waiting_for_link":
+    if not pending or pending["stage"] != "alternate_link":
         return
 
     link = update.message.text.strip()
     if not re.match(r'^https?://', link):
-        return await update.message.reply_text("❌ Invalid link format. Please send a valid URL starting with http:// or https://.")
+        return await update.message.reply_text("❌ Invalid link format. Please send a valid URL starting with http:// or https://, or type /skip to proceed.")
 
     pending["alternate_link"] = link
     pending["stage"] = "code"
@@ -290,9 +280,9 @@ def main():
     app.add_handler(CallbackQueryHandler(retry_join, pattern=r"^retry_"))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("delete", delete_movie))
+    app.add_handler(CommandHandler("skip", skip_alternate_link))
     app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, handle_forwarded_file))
     app.add_handler(MessageHandler((filters.PHOTO | filters.FORWARDED | filters.TEXT) & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_poster))
-    app.add_handler(CallbackQueryHandler(handle_alternate_link_choice, pattern=r"^(send_alternate_link|skip_alternate_link)$"))
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND & filters.Regex(r'^https?://'), handle_alternate_link))
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.Regex(r'^https?://'), handle_code))
 
