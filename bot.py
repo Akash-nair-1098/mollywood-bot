@@ -48,7 +48,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = args[0].lower()
     context.user_data["start_code"] = code
 
-    # Check if user has joined the main channel
     try:
         member = await context.bot.get_chat_member(MAIN_CHANNEL, user_id)
         if member.status not in ["member", "administrator", "creator"]:
@@ -82,7 +81,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text=file_info.get("original_caption", "📄 Info"),
                     parse_mode=ParseMode.MARKDOWN
                 )
-
         except Exception as e:
             await update.message.reply_text(f"⚠️ Failed to send: {e}")
 
@@ -119,20 +117,17 @@ async def retry_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text=file_info.get("original_caption", "📄 Info"),
                     parse_mode=ParseMode.MARKDOWN
                 )
-
         except Exception as e:
             await context.bot.send_message(
                 chat_id=query.message.chat.id,
                 text=f"⚠️ Failed to send: {e}"
             )
 
-# --- Command: /status ---
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     await update.message.reply_text("✅ Bot is alive.")
 
-# --- Command: /delete <moviecode> ---
 async def delete_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -145,7 +140,6 @@ async def delete_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_json(MOVIES_FILE, movie_data)
     await update.message.reply_text(f"🗑 Deleted movie `{code}`", parse_mode="Markdown")
 
-# --- Handle Forwarded Movie Files ---
 async def handle_forwarded_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -183,7 +177,6 @@ async def handle_forwarded_file(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         save_json(PENDING_FILE, pending_data)
 
-# --- Handle Poster ---
 async def handle_poster(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -193,7 +186,6 @@ async def handle_poster(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     message = update.message
-    # Handle both direct and forwarded messages for poster
     caption = message.caption or message.text or ""
     if message.forward_from_chat:
         caption = message.caption or message.text or ""
@@ -205,14 +197,12 @@ async def handle_poster(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending["stage"] = "alternate_link"
     save_json(PENDING_FILE, pending_data)
     
-    # Create buttons for alternate link or skip
     btn = InlineKeyboardMarkup([
         [InlineKeyboardButton("📎 Send Alternate Link", callback_data="send_alternate_link")],
         [InlineKeyboardButton("⏭ Skip", callback_data="skip_alternate_link")]
     ])
     await update.message.reply_text("🔗 Please send an alternate link or skip.", reply_markup=btn)
 
-# --- Handle Alternate Link Button Choices ---
 async def handle_alternate_link_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -230,7 +220,6 @@ async def handle_alternate_link_choice(update: Update, context: ContextTypes.DEF
         save_json(PENDING_FILE, pending_data)
         await query.edit_message_text("🔢 Now send the unique movie code for /start command.")
 
-# --- Handle Alternate Link ---
 async def handle_alternate_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -248,7 +237,6 @@ async def handle_alternate_link(update: Update, context: ContextTypes.DEFAULT_TY
     save_json(PENDING_FILE, pending_data)
     await update.message.reply_text("🔢 Now send the unique movie code for /start command.")
 
-# --- Handle Movie Code Entry ---
 async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -271,7 +259,6 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     del pending_data[user_key]
     save_json(PENDING_FILE, pending_data)
 
-    # Create buttons for Get Movie and optional alternate link
     buttons = [
         [InlineKeyboardButton("▶️ Get Movie", url=f"https://t.me/{context.bot.username}?start={code}")]
     ]
@@ -296,7 +283,6 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("✅ Movie added. Forward the above message to your group!")
 
-# --- Entrypoint ---
 def main():
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
@@ -307,8 +293,8 @@ def main():
     app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, handle_forwarded_file))
     app.add_handler(MessageHandler((filters.PHOTO | filters.FORWARDED | filters.TEXT) & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_poster))
     app.add_handler(CallbackQueryHandler(handle_alternate_link_choice, pattern=r"^(send_alternate_link|skip_alternate_link)$"))
-    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_alternate_link))
-    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_code))
+    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND & filters.Regex(r'^https?://'), handle_alternate_link))
+    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.Regex(r'^https?://'), handle_code))
 
     print("✅ Bot is running...")
     app.run_polling()
