@@ -48,7 +48,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = args[0].lower()
     context.user_data["start_code"] = code
 
-    # Check if user has joined the main channel
     try:
         member = await context.bot.get_chat_member(MAIN_CHANNEL, user_id)
         if member.status not in ["member", "administrator", "creator"]:
@@ -70,7 +69,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for file_info in movie_data[code]["files"]:
         try:
             if file_info.get("file_id"):
-                # Media file — send with custom caption
                 await context.bot.send_document(
                     chat_id=update.effective_chat.id,
                     document=file_info["file_id"],
@@ -78,16 +76,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode=ParseMode.MARKDOWN
                 )
             else:
-                # No file — send the original caption/text exactly as-is
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text=file_info.get("original_caption", "📄 Info"),
-                    parse_mode=ParseMode.MARKDOWN  # Or remove if formatting breaks
+                    text=file_info.get("original_caption", "\ud83d\udcc4 Info"),
+                    parse_mode=ParseMode.MARKDOWN
                 )
-
         except Exception as e:
-            await update.message.reply_text(f"⚠️ Failed to send: {e}")
-
+            await update.message.reply_text(f"\u26a0\ufe0f Failed to send: {e}")
 
 async def retry_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -119,23 +114,20 @@ async def retry_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await context.bot.send_message(
                     chat_id=query.message.chat.id,
-                    text=file_info.get("original_caption", "📄 Info"),
-                    parse_mode=ParseMode.MARKDOWN  # Or remove
+                    text=file_info.get("original_caption", "\ud83d\udcc4 Info"),
+                    parse_mode=ParseMode.MARKDOWN
                 )
-
         except Exception as e:
             await context.bot.send_message(
                 chat_id=query.message.chat.id,
-                text=f"⚠️ Failed to send: {e}"
+                text=f"\u26a0\ufe0f Failed to send: {e}"
             )
 
-# --- Command: /status ---
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     await update.message.reply_text("✅ Bot is alive.")
 
-# --- Command: /delete <moviecode> ---
 async def delete_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -148,7 +140,6 @@ async def delete_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_json(MOVIES_FILE, movie_data)
     await update.message.reply_text(f"🗑 Deleted movie `{code}`", parse_mode="Markdown")
 
-# --- Handle Forwarded Movie Files ---
 async def handle_forwarded_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -186,7 +177,6 @@ async def handle_forwarded_file(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         save_json(PENDING_FILE, pending_data)
 
-# --- Handle Poster ---
 async def handle_poster(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -202,7 +192,6 @@ async def handle_poster(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_json(PENDING_FILE, pending_data)
     await update.message.reply_text("🔢 Now send the unique movie code for /start command.")
 
-# --- Handle Movie Code Entry ---
 async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -215,27 +204,51 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if code in movie_data:
         return await update.message.reply_text("❌ Code already exists. Try another.")
 
+    pending["code"] = code
+    pending["stage"] = "altlink"
+    save_json(PENDING_FILE, pending_data)
+    await update.message.reply_text("🌐 (Optional) Send an alternate link or type 'skip'.")
+
+async def handle_alt_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    user_key = str(update.effective_user.id)
+    pending = pending_data.get(user_key)
+    if not pending or pending["stage"] != "altlink":
+        return
+
+    alt_link = update.message.text.strip()
+    if alt_link.lower() != "skip":
+        pending["alt_link"] = alt_link
+
+    code = pending.pop("code")
     movie_data[code] = {
         "files": pending["files"],
         "poster": pending.get("poster", ""),
-        "photo": pending.get("photo")
+        "photo": pending.get("photo"),
+        "alt_link": pending.get("alt_link")
     }
+
     save_json(MOVIES_FILE, movie_data)
     del pending_data[user_key]
     save_json(PENDING_FILE, pending_data)
 
-    btn = InlineKeyboardMarkup([
+    buttons = [
         [InlineKeyboardButton("▶️ Get Movie", url=f"https://t.me/{context.bot.username}?start={code}")]
-    ])
+    ]
+
+    if movie_data[code].get("alt_link"):
+        buttons.append([InlineKeyboardButton("❓ Bot not working? Click here", url=movie_data[code]["alt_link"])])
+
+    reply_markup = InlineKeyboardMarkup(buttons)
 
     if "photo" in movie_data[code]:
-        await context.bot.send_photo(update.effective_chat.id, photo=movie_data[code]["photo"], caption=movie_data[code]["poster"], reply_markup=btn)
+        await context.bot.send_photo(update.effective_chat.id, photo=movie_data[code]["photo"], caption=movie_data[code]["poster"], reply_markup=reply_markup)
     else:
-        await context.bot.send_message(update.effective_chat.id, text=movie_data[code]["poster"], reply_markup=btn)
+        await context.bot.send_message(update.effective_chat.id, text=movie_data[code]["poster"], reply_markup=reply_markup)
 
     await update.message.reply_text("✅ Movie added. Forward the above message to your group!")
 
-# --- Entrypoint ---
 def main():
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
@@ -245,6 +258,7 @@ def main():
     app.add_handler(CommandHandler("delete", delete_movie))
     app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, handle_forwarded_file))
     app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, handle_poster))
+    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_alt_link))
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_code))
 
     print("✅ Bot is running...")
