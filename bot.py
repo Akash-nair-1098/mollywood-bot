@@ -282,7 +282,7 @@ def main():
     app.add_handler(CommandHandler("skip", skip_alternate_link))
 
     # Handlers with specific filters first
-    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND & filters.Regex(r'^https?://'), handle_alternate_link))
+    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND , handle_alternate_link))
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.Regex(r'^https?://'), handle_code))
 
     # Then general ones
