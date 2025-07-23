@@ -219,9 +219,8 @@ async def handle_alternate_link(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     link = update.message.text.strip()
-    if not re.match(r'^https?://', link):
-        return await update.message.reply_text("❌ Invalid link format. Please send a valid URL starting with http:// or https://, or type /skip to proceed.")
-
+    # if not re.match(r'^https?://', link):
+    #     return await update.message.reply_text("❌ Invalid link format. Please send a valid URL starting with http:// or https://, or type /skip to proceed.")
     pending["alternate_link"] = link
     pending["stage"] = "code"
     save_json(PENDING_FILE, pending_data)
