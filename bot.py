@@ -272,6 +272,24 @@ async def handle_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("✅ Movie added. Forward the above message to your group!")
 
+
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    user_key = str(update.effective_user.id)
+    pending = pending_data.get(user_key)
+    if not pending:
+        return
+
+    stage = pending.get("stage")
+    if stage == "alternate_link":
+        await handle_alternate_link(update, context)
+    elif stage == "code":
+        await handle_code(update, context)
+    else:
+        await handle_poster(update, context)
+
+        
 def main():
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
@@ -282,11 +300,7 @@ def main():
     app.add_handler(CommandHandler("skip", skip_alternate_link))
 
     # Handlers with specific filters first
-    if pending["stage"] == "code":
-        app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_code))
-    
-   if pending["stage"] == "alternate_link":
-         app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND , handle_alternate_link))
+app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_text_message))
     
 
     # Then general ones
