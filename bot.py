@@ -289,7 +289,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await handle_poster(update, context)
 
-        
+
 def main():
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
@@ -300,7 +300,7 @@ def main():
     app.add_handler(CommandHandler("skip", skip_alternate_link))
 
     # Handlers with specific filters first
-app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_text_message))
+    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_text_message))
     
 
     # Then general ones
