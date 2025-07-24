@@ -282,8 +282,12 @@ def main():
     app.add_handler(CommandHandler("skip", skip_alternate_link))
 
     # Handlers with specific filters first
-    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND , handle_alternate_link))
-    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_code))
+    if pending["stage"] == "code":
+        app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND, handle_code))
+    
+   if pending["stage"] == "alternate_link":
+         app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & ~filters.COMMAND , handle_alternate_link))
+    
 
     # Then general ones
     app.add_handler(MessageHandler(filters.FORWARDED & filters.ChatType.PRIVATE, handle_forwarded_file))
